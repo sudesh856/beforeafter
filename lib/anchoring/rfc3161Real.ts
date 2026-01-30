@@ -41,47 +41,77 @@ function createTimeStampReq(hashHex: string): Uint8Array {
 }
 
 function extractSerialFromToken(tokenBytes: Uint8Array): string {
+  // TSTInfo structure: SEQUENCE { version, policy, messageImprint, serialNumber, ... }
+  // We need to find the serialNumber field which comes after messageImprint
+  // Skip the first few INTEGERs and look for one that's 4-20 bytes (typical serial)
+  
+  let integerCount = 0;
+  
   for (let i = 0; i < tokenBytes.length - 2; i++) {
-    if (tokenBytes[i] === 0x02) {
+    if (tokenBytes[i] === 0x02) { // INTEGER tag
       const length = tokenBytes[i + 1];
-      if (length > 0 && length <= 20 && i + 2 + length <= tokenBytes.length) {
+      
+      integerCount++;
+      
+      // Serial number is typically the 2nd or 3rd INTEGER, and 4-20 bytes long
+      // Skip version (1 byte) and small integers
+      if (integerCount >= 2 && length >= 4 && length <= 20 && i + 2 + length <= tokenBytes.length) {
         const serialBytes = tokenBytes.slice(i + 2, i + 2 + length);
-        return Array.from(serialBytes).map(b => b.toString(16).padStart(2, '0')).join('').toUpperCase();
+        const hex = Array.from(serialBytes)
+          .map(b => b.toString(16).padStart(2, '0'))
+          .join('')
+          .toUpperCase();
+        
+        // Return first reasonable serial we find
+        if (hex.length >= 8) { // At least 4 bytes = 8 hex chars
+          return hex;
+        }
       }
     }
   }
+  
   return 'UNKNOWN';
 }
 
 function extractTimestampFromToken(tokenBytes: Uint8Array): string {
-  for (let i = 0; i < tokenBytes.length - 2; i++) {
-    const tag = tokenBytes[i];
-    const length = tokenBytes[i + 1];
-
-    if (tag === 0x18 && length >= 14 && i + 2 + length <= tokenBytes.length) {
-      const timeBytes = tokenBytes.slice(i + 2, i + 2 + length);
-      const timeStr = new TextDecoder().decode(timeBytes);
-      if (timeStr.includes('-') || timeStr.includes(':')) {
-        return timeStr;
-      }
-      const match = timeStr.match(/(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})/);
-      if (match) {
-        return `${match[1]}-${match[2]}-${match[3]}T${match[4]}:${match[5]}:${match[6]}Z`;
-      }
-    }
-
-    if (tag === 0x17 && length >= 13 && i + 2 + length <= tokenBytes.length) {
-      const timeBytes = tokenBytes.slice(i + 2, i + 2 + length);
-      const timeStr = new TextDecoder().decode(timeBytes);
-      const match = timeStr.match(/(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})/);
-      if (match) {
-        const yy = parseInt(match[1]);
-        const yyyy = yy > 50 ? 1900 + yy : 2000 + yy;
-        return `${yyyy}-${match[2]}-${match[3]}T${match[4]}:${match[5]}:${match[6]}Z`;
+  // Look for GeneralizedTime (0x18) - format: YYYYMMDDHHmmss[.fff]Z
+  for (let i = 0; i < tokenBytes.length - 15; i++) {
+    if (tokenBytes[i] === 0x18) { // GeneralizedTime tag
+      const length = tokenBytes[i + 1];
+      if (length >= 13 && length <= 23 && i + 2 + length <= tokenBytes.length) {
+        const timeBytes = tokenBytes.slice(i + 2, i + 2 + length);
+        const timeStr = new TextDecoder('utf-8', { fatal: false }).decode(timeBytes);
+        
+        // Parse GeneralizedTime: YYYYMMDDHHmmssZ or YYYYMMDDHHmmss.fffZ
+        const match = timeStr.match(/^(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})/);
+        if (match) {
+          const [_, year, month, day, hour, min, sec] = match;
+          return `${year}-${month}-${day}T${hour}:${min}:${sec}Z`;
+        }
       }
     }
   }
-
+  
+  // Fallback: look for UTCTime (0x17) - format: YYMMDDHHmmssZ
+  for (let i = 0; i < tokenBytes.length - 13; i++) {
+    if (tokenBytes[i] === 0x17) {
+      const length = tokenBytes[i + 1];
+      if (length >= 11 && length <= 17 && i + 2 + length <= tokenBytes.length) {
+        const timeBytes = tokenBytes.slice(i + 2, i + 2 + length);
+        const timeStr = new TextDecoder('utf-8', { fatal: false }).decode(timeBytes);
+        
+        const match = timeStr.match(/^(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})/);
+        if (match) {
+          const [_, yy, month, day, hour, min, sec] = match;
+          const year = parseInt(yy) > 50 ? `19${yy}` : `20${yy}`;
+          return `${year}-${month}-${day}T${hour}:${min}:${sec}Z`;
+        }
+      }
+    }
+  }
+  
+  // Last resort: use current time
+  console.warn('[RFC3161] Could not extract timestamp from token, using current time');
   return new Date().toISOString();
 }
 
