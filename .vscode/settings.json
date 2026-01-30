@@ -1,0 +1,13 @@
+{
+  "editor.codeActionsOnSave": {
+    "source.fixAll": "explicit",
+    "source.organizeImports": "explicit",
+    "source.sortMembers": "explicit"
+  },
+  "files.watcherExclude": {
+    "**/node_modules/*": true
+  },
+  "search.exclude": {
+    "**/node_modules": true
+  }
+}
