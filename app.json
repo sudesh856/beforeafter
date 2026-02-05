@@ -7,7 +7,6 @@
     "icon": "./assets/images/icon.png",
     "scheme": "beforeafter",
     "userInterfaceStyle": "automatic",
-    "newArchEnabled": true,
     "ios": {
       "supportsTablet": true
     },
@@ -18,8 +17,7 @@
         "backgroundImage": "./assets/images/android-icon-background.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
-      "edgeToEdgeEnabled": true,
-      "predictiveBackGestureEnabled": false
+      "package": "com.nfov63.beforeafter"
     },
     "web": {
       "output": "static",
@@ -38,12 +36,14 @@
             "backgroundColor": "#000000"
           }
         }
-      ],
-      "expo-secure-store"
+      ]
     ],
-    "experiments": {
-      "typedRoutes": true,
-      "reactCompiler": true
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "cf1bd6f7-7b85-43c2-8acd-8c00f08e0e82"
+      },
+      "GOOGLE_AI_API_KEY": "AIzaSyB8gZCvSnmrDKVBdeQs9yM3yWBJNgvj2ps"
     }
   }
 }

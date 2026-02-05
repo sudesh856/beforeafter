@@ -2,8 +2,12 @@ import { AuditEvent, EditingViolation, LocationData, ProofRecord, SessionMetadat
 // Note: TamperFlag type in @/lib/proof needs to include 'time_window_expired' in its reason union type
 // Update the TamperFlag definition to: reason: 'before_deleted' | 'session_abandoned' | 'timeout' | 'location_mismatch' | 'time_window_expired'
 import { getAnchorService } from '@/lib/anchoring/anchorService';
+
 import { DIGICERT_TSA, FREETSA } from '@/lib/anchoring/tsaClient';
+import { initFirebaseOnStartup, uploadProofMetadata } from '@/lib/firebase';
 import { validateRadius } from '@/lib/radiusEnforcement';
+import { getDeviceId } from '@/lib/witnessDatabase';
+import { manualSync, startPeriodicSync } from '@/lib/witnessSync';
 
 
 
@@ -21,6 +25,7 @@ import {
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 
+import { Ionicons } from '@expo/vector-icons';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as Crypto from 'expo-crypto';
 import * as Device from 'expo-device';
@@ -36,11 +41,13 @@ import {
   AppStateStatus,
   InteractionManager,
   Platform,
+  SafeAreaView,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
-  View,
+  View
 } from 'react-native';
 
 
@@ -68,8 +75,10 @@ type SessionData = {
 
 export default function HomeScreen() {
   const cameraRef = useRef<CameraView>(null);
-    const [jobSiteLocation, setJobSiteLocation] = useState<LocationData | null>(null); // ✅ PUT IT HERE
+  const [jobSiteLocation, setJobSiteLocation] = useState<LocationData | null>(null); // ✅ PUT IT HERE
 
+  // Welcome screen state
+  const [hasProceeded, setHasProceeded] = useState(false);
 
   const [beforeUri, setBeforeUri] = useState<string | null>(null);
   const [afterUri, setAfterUri] = useState<string | null>(null);
@@ -994,9 +1003,8 @@ const afterIntegrity = await checkPhotoIntegrity(after, 'after', activeSession.i
       // USER-DECLARED TIME WINDOW ENFORCEMENT - Append time window data to proof
       timeWindow: updatedTimeWindow,
       timeAnomalies: getDetectedAnomalies(),
+      creatorDeviceId: await getDeviceId(), // WITNESS DEDUPLICATION - Store device that created this proof
     };
-
- 
 
     const existing = await AsyncStorage.getItem('proofs');
     const proofs = existing ? JSON.parse(existing) : [];
@@ -1007,6 +1015,29 @@ const afterIntegrity = await checkPhotoIntegrity(after, 'after', activeSession.i
     const limitedProofs = proofs.slice(0, 20);
 
     await AsyncStorage.setItem('proofs', JSON.stringify(limitedProofs));
+
+    // 🌐 PEER-TO-PEER NETWORK - Upload proof metadata to Firebase witness network
+    // Only uploads cryptographic hashes and verification code, NOT photo files
+    // This allows other devices to witness and verify this proof
+    try {
+      const uploadSuccess = await uploadProofMetadata({
+        verificationCode: proof.verificationCode,
+        sessionId: proof.sessionId,
+        beforeHash: proof.beforeHash,
+        afterHash: proof.afterHash,
+        timestamp: proof.createdAt,
+        creatorDeviceId: proof.creatorDeviceId, // WITNESS DEDUPLICATION - Include creator info
+      });
+      
+      if (uploadSuccess) {
+        console.log('📡 Proof registered to peer-to-peer network');
+        // Optionally trigger a manual sync to get it into the local witness db
+        await manualSync();
+      }
+    } catch (error) {
+      // Non-blocking: network registration is optional
+      console.warn('⚠️ Failed to register proof to network (offline?)', error);
+    }
 
     // AUDIT TRAIL - Log proof creation
     await logAuditEvent('proof_created', activeSession.id, proof.id, afterLoc, {
@@ -1087,7 +1118,7 @@ anchorService.enableRealTSA(FREETSA)
 
   // PERFORMANCE FIX 6 - Pre-initialize camera permissions on app start
   useEffect(() => {
-    const initializePermissions = async () => {
+    const initializeApp = async () => {
       try {
         console.log('[PERF] Pre-requesting camera permissions...');
         // This caches the permission so it's instant when user clicks button
@@ -1095,12 +1126,20 @@ anchorService.enableRealTSA(FREETSA)
           // Just request, don't require user to grant right now
           // The useCameraPermissions hook already manages this
         }
+        
+        // Initialize Firebase and start witness network sync
+        try {
+          if (initFirebaseOnStartup) initFirebaseOnStartup();
+          if (startPeriodicSync) startPeriodicSync();
+        } catch (e) {
+          console.warn('Network initialization skipped:', e);
+        }
       } catch (error) {
         console.log('[PERF] Permission pre-init error (non-critical):', error);
       }
     };
     
-    initializePermissions();
+    initializeApp();
   }, []);
 
   // USER-DECLARED TIME WINDOW ENFORCEMENT - Monitor app lifecycle for anomalies
@@ -1253,12 +1292,39 @@ initializeApp();
 
   if (!permission.granted) {
     return (
-      <View style={styles.container}>
-        <Text style={styles.text}>Camera permission required</Text>
-        <TouchableOpacity style={styles.button} onPress={requestPermission}>
-          <Text style={styles.buttonText}>Allow Camera</Text>
-        </TouchableOpacity>
-      </View>
+      <SafeAreaView style={styles.container}>
+        <View style={styles.permissionContainer}>
+          <Ionicons name="camera" size={64} color="#3b82f6" style={styles.permissionIcon} />
+          <Text style={styles.permissionTitle}>Camera Access Required</Text>
+          <Text style={styles.permissionText}>We need camera permission to capture proof photos</Text>
+          <TouchableOpacity style={styles.primaryButton} onPress={requestPermission}>
+            <Text style={styles.primaryButtonText}>Grant Permission</Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  // Welcome Screen
+  if (!hasProceeded) {
+    return (
+      <SafeAreaView style={[styles.container, styles.welcomeContainer]}>
+        <View style={styles.welcomeContent}>
+          <Ionicons name="shield-checkmark" size={100} color="#ffffff" style={styles.welcomeIcon} />
+          <Text style={styles.welcomeTitle}>BeforeAfter</Text>
+          <Text style={styles.welcomeSubtitle}>Tamper-Evident Proof System</Text>
+          <Text style={styles.welcomeDescription}>
+            Capture verified before and after photos with cryptographic proof and timestamp authentication.
+          </Text>
+          <TouchableOpacity 
+            style={styles.proceedButton}
+            onPress={() => setHasProceeded(true)}
+          >
+            <Text style={styles.proceedButtonText}>Start Capturing</Text>
+            <Ionicons name="arrow-forward" size={20} color="#3b82f6" style={styles.proceedButtonIcon} />
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
     );
   }
 
@@ -1426,551 +1492,1070 @@ initializeApp();
   }
 
   return (
-    <View style={styles.container}>
-      <Text style={styles.title}>BeforeAfter</Text>
-      <Text style={styles.subtitle}>Tamper-Evident Proof System</Text>
+    <SafeAreaView style={styles.safeArea}>
+      <ScrollView 
+        style={styles.scrollView}
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+      >
+        {/* Header Section */}
+        <View style={styles.header}>
+          <Text style={styles.headerTitle}>BeforeAfter</Text>
+          <Text style={styles.headerSubtitle}>Tamper-Evident Proof Capture</Text>
+        </View>
 
-      {/* AUDIT TRAIL - Job details form (ADDED) */}
-      {!beforeTaken && !showMetadataForm && (
-        <TouchableOpacity
-          style={styles.metadataButton}
-          onPress={() => setShowMetadataForm(true)}
-        >
-          <Text style={styles.metadataButtonText}>+ Add Job Details (Optional)</Text>
-        </TouchableOpacity>
-      )}
-
-      {showMetadataForm && !beforeTaken && (
-        <View style={styles.metadataForm}>
-          <Text style={styles.formTitle}>Job Details</Text>
-          
-          <TextInput
-            style={styles.input}
-            placeholder="Job ID (optional)"
-            placeholderTextColor="#888"
-            value={jobId}
-            onChangeText={setJobId}
-          />
-          
-          <TextInput
-            style={styles.input}
-            placeholder="Client Name (optional)"
-            placeholderTextColor="#888"
-            value={clientName}
-            onChangeText={setClientName}
-          />
-          
+        {/* Job Details Card */}
+        {!beforeTaken && !showMetadataForm && (
           <TouchableOpacity
-            style={styles.saveButton}
-            onPress={() => {
-              setSessionMetadata({
-                jobId,
-                clientName,
-                tags: []
-              });
-              setShowMetadataForm(false);
-              if (jobId || clientName) {
-                logAuditEvent('session_metadata_updated', undefined, undefined, undefined, {
+            style={styles.card}
+            onPress={() => setShowMetadataForm(true)}
+          >
+            <View style={styles.cardHeader}>
+              <Ionicons name="document-text" size={20} color="#3b82f6" />
+              <Text style={styles.cardTitle}>Add Job Details (Optional)</Text>
+            </View>
+            <Text style={styles.cardText}>Add context to your proof</Text>
+          </TouchableOpacity>
+        )}
+
+        {/* Job Details Form */}
+        {showMetadataForm && !beforeTaken && (
+          <View style={[styles.card, styles.formCard]}>
+            <View style={styles.cardHeader}>
+              <Ionicons name="document-text" size={20} color="#3b82f6" />
+              <Text style={styles.cardTitle}>Job Details</Text>
+            </View>
+            
+            <TextInput
+              style={styles.input}
+              placeholder="Job ID (optional)"
+              placeholderTextColor="#94a3b8"
+              value={jobId}
+              onChangeText={setJobId}
+            />
+            
+            <TextInput
+              style={styles.input}
+              placeholder="Client Name (optional)"
+              placeholderTextColor="#94a3b8"
+              value={clientName}
+              onChangeText={setClientName}
+            />
+            
+            <TouchableOpacity
+              style={styles.primaryButton}
+              onPress={() => {
+                setSessionMetadata({
                   jobId,
-                  clientName
+                  clientName,
+                  tags: []
                 });
-              }
+                setShowMetadataForm(false);
+                if (jobId || clientName) {
+                  logAuditEvent('session_metadata_updated', undefined, undefined, undefined, {
+                    jobId,
+                    clientName
+                  });
+                }
+              }}
+            >
+              <Text style={styles.primaryButtonText}>Save Details</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.secondaryButton}
+              onPress={() => setShowMetadataForm(false)}
+            >
+              <Text style={styles.secondaryButtonText}>Skip</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {/* Job Info Display */}
+        {sessionMetadata.jobId && !showMetadataForm && (
+          <View style={[styles.card, styles.infoCard]}>
+            <View style={styles.infoBadge}>
+              <Ionicons name="briefcase" size={16} color="#3b82f6" />
+              <Text style={styles.infoBadgeText}>{sessionMetadata.jobId}</Text>
+            </View>
+            {sessionMetadata.clientName && (
+              <View style={styles.infoBadge}>
+                <Ionicons name="person" size={16} color="#3b82f6" />
+                <Text style={styles.infoBadgeText}>{sessionMetadata.clientName}</Text>
+              </View>
+            )}
+          </View>
+        )}
+
+        {/* Time Window Setup Card */}
+        {!beforeTaken && !timeWindow && !showTimeWindowForm && (
+          <TouchableOpacity
+            style={styles.card}
+            onPress={() => {
+              setSelectedMinTimeMin(5);
+              setSelectedMaxTimeMin(10);
+              setShowTimeWindowForm(true);
             }}
           >
-            <Text style={styles.saveButtonText}>Save Details</Text>
+            <View style={styles.cardHeader}>
+              <Ionicons name="time" size={20} color="#0ea5e9" />
+              <Text style={styles.cardTitle}>Set Time Window (Required)</Text>
+            </View>
+            <Text style={styles.cardText}>Define min/max time between photos</Text>
           </TouchableOpacity>
+        )}
 
+        {/* Time Window Form */}
+        {showTimeWindowForm && !beforeTaken && !timeWindow && (
+          <View style={[styles.card, styles.formCard]}>
+            <View style={styles.cardHeader}>
+              <Ionicons name="time" size={20} color="#0ea5e9" />
+              <Text style={styles.cardTitle}>User-Declared Time Window</Text>
+            </View>
+            
+            <Text style={styles.timeWindowDescription}>
+              Define the expected time between Before and After photos. This window is immutable once a session starts.
+            </Text>
+            
+            <View style={styles.timeWindowInputContainer}>
+              <View style={styles.timeWindowInputGroup}>
+                <Text style={styles.timeWindowLabel}>Minimum Time (minutes):</Text>
+                <View style={styles.timeWindowSliderContainer}>
+                  <TouchableOpacity
+                    style={styles.spinButton}
+                    onPress={() => setSelectedMinTimeMin(Math.max(1, (selectedMinTimeMin ?? 1) - 1))}
+                  >
+                    <Text style={styles.spinButtonText}>−</Text>
+                  </TouchableOpacity>
+                  <TextInput
+                    style={styles.timeWindowInput}
+                    keyboardType="numeric"
+                    value={(selectedMinTimeMin ?? 1).toString()}
+                    onChangeText={(text) => {
+                      const val = parseInt(text) || 1;
+                      const maxVal = selectedMaxTimeMin ?? 10;
+                      if (val < maxVal) {
+                        setSelectedMinTimeMin(Math.max(1, val));
+                      }
+                    }}
+                  />
+                  <TouchableOpacity
+                    style={styles.spinButton}
+                    onPress={() => {
+                      const minVal = selectedMinTimeMin ?? 1;
+                      const maxVal = selectedMaxTimeMin ?? 10;
+                      if (minVal + 1 < maxVal) {
+                        setSelectedMinTimeMin(minVal + 1);
+                      }
+                    }}
+                  >
+                    <Text style={styles.spinButtonText}>+</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
 
-              
+              <View style={styles.timeWindowInputGroup}>
+                <Text style={styles.timeWindowLabel}>Maximum Time (minutes):</Text>
+                <View style={styles.timeWindowSliderContainer}>
+                  <TouchableOpacity
+                    style={styles.spinButton}
+                    onPress={() => {
+                      const minVal = selectedMinTimeMin ?? 1;
+                      const maxVal = selectedMaxTimeMin ?? 10;
+                      if (maxVal - 1 > minVal) {
+                        setSelectedMaxTimeMin(maxVal - 1);
+                      }
+                    }}
+                  >
+                    <Text style={styles.spinButtonText}>−</Text>
+                  </TouchableOpacity>
+                  <TextInput
+                    style={styles.timeWindowInput}
+                    keyboardType="numeric"
+                    value={(selectedMaxTimeMin ?? 10).toString()}
+                    onChangeText={(text) => {
+                      const minVal = selectedMinTimeMin ?? 1;
+                      const val = parseInt(text) || minVal + 1;
+                      if (val > minVal) {
+                        setSelectedMaxTimeMin(Math.max(minVal + 1, val));
+                      }
+                    }}
+                  />
+                  <TouchableOpacity
+                    style={styles.spinButton}
+                    onPress={() => setSelectedMaxTimeMin((selectedMaxTimeMin ?? 10) + 1)}
+                  >
+                    <Text style={styles.spinButtonText}>+</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </View>
 
-
-          
-          <TouchableOpacity
-            style={styles.cancelFormButton}
-            onPress={() => setShowMetadataForm(false)}
-          >
-            <Text style={styles.cancelFormButtonText}>Skip</Text>
-          </TouchableOpacity>
-        </View>
-      )}
-      
-      {/* AUDIT TRAIL - Show job info if set (ADDED) */}
-      {sessionMetadata.jobId && !showMetadataForm && (
-        <View style={styles.jobInfo}>
-          <Text style={styles.jobInfoText}>Job: {sessionMetadata.jobId}</Text>
-          {sessionMetadata.clientName && (
-            <Text style={styles.jobInfoText}>Client: {sessionMetadata.clientName}</Text>
-          )}
-        </View>
-      )}
-      
-      {/* PAIRED SESSION LOCKING - Show session info if active */}
-      {activeSession && activeSession.isActive && (
-        <View style={styles.sessionInfo}>
-          <Text style={styles.sessionText}>🔒 Session Active</Text>
-          <Text style={styles.sessionSubtext}>
-            Before photo captured. You must complete this session.
-          </Text>
-          {/* USER-DECLARED TIME WINDOW ENFORCEMENT - Show declared time window */}
-          {timeWindow && (
-            <View style={styles.timeWindowBanner}>
-              <Text style={styles.timeWindowText}>
-                ⏱️ Time Window: {selectedMinTimeMin}-{selectedMaxTimeMin} minutes
+            <View style={styles.timeWindowInfo}>
+              <Text style={styles.timeWindowInfoText}>
+                Window: {selectedMinTimeMin}–{selectedMaxTimeMin} minutes
               </Text>
-              <Text style={styles.timeWindowSubtext}>
-                Elapsed: {(elapsedTimeMs / 1000).toFixed(1)}s
+              <Text style={styles.timeWindowWarning}>
+                ⚠️ These values cannot be changed once the session starts.
               </Text>
-              {timeWindowStatus && (
-                <Text style={[
-                  styles.timeWindowStatus,
-                  timeWindowStatus === 'VALID' ? styles.timeWindowStatusValid :
-                  timeWindowStatus === 'EXPIRED' ? styles.timeWindowStatusExpired :
-                  styles.timeWindowStatusInvalid
-                ]}>
-                  {timeWindowStatus === 'VALID' ? '✅ Valid' :
-                   timeWindowStatus === 'EXPIRED' ? '❌ Expired' :
-                   '⏳ Not Ready'}
-                </Text>
+            </View>
+            
+            <TouchableOpacity
+              style={styles.primaryButton}
+              onPress={() => {
+                if (selectedMinTimeMin !== null && selectedMaxTimeMin !== null && 
+                    selectedMinTimeMin > 0 && selectedMaxTimeMin > 0 && 
+                    selectedMinTimeMin < selectedMaxTimeMin) {
+                  const minTimeMs = selectedMinTimeMin * 60 * 1000;
+                  const maxTimeMs = selectedMaxTimeMin * 60 * 1000;
+                  const timeWindowData: TimeWindowData = {
+                    minTimeMs,
+                    maxTimeMs,
+                    actualElapsedMs: 0,
+                    timeSource: getTimeSource(),
+                    timeVerificationStatus: 'INVALID',
+                    createdAt: new Date().toISOString(),
+                  };
+                  setTimeWindow(timeWindowData);
+                  setElapsedTimeMs(0);
+                  setTimeWindowStatus('INVALID');
+                  setTimeAnomalies([]);
+                  setShowTimeWindowForm(false);
+                } else {
+                  setValidationError('Please select valid min and max times');
+                }
+              }}
+            >
+              <Text style={styles.primaryButtonText}>Proceed with Time Window</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.secondaryButton}
+              onPress={() => {
+                setShowTimeWindowForm(false);
+                setSelectedMinTimeMin(null);
+                setSelectedMaxTimeMin(null);
+              }}
+            >
+              <Text style={styles.secondaryButtonText}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {/* Start Session Card */}
+        {!beforeTaken && (
+          <View style={[styles.card, styles.mainActionCard]}>
+            <View style={styles.mainActionIconContainer}>
+              <Ionicons name="camera" size={48} color="#3b82f6" />
+            </View>
+            <Text style={styles.mainActionTitle}>Start Capture Session</Text>
+            <Text style={styles.mainActionDescription}>
+              Capture before and after photos with verified metadata
+            </Text>
+            <TouchableOpacity
+              style={[styles.primaryButton, (isProcessing || !timeWindow) && styles.buttonDisabled]}
+              disabled={isProcessing || !timeWindow}
+              onPress={async () => {
+                if (isProcessing || isProcessingRef.current) {
+                  console.log('[PERF] Button already processing, ignoring click');
+                  return;
+                }
+
+                isProcessingRef.current = true;
+                setIsProcessing(true);
+                setProcessingMessage('Opening camera...');
+
+                try {
+                  console.log('[PERF] "Take BEFORE photo" button clicked:', Date.now());
+
+                  if (!jobSiteLocation) {
+                    fetchGPSWithFallback(5000).then((gpsData) => {
+                      if (gpsData) {
+                        setJobSiteLocation(gpsData);
+                        console.log('[PERF] Job site location set:', gpsData);
+                      }
+                    }).catch((err) => {
+                      console.log('[PERF] Background GPS fetch failed:', err);
+                    });
+                  }
+
+                  setMode('before');
+                  setShowCamera(true);
+                  setProcessingMessage(null);
+                } catch (error) {
+                  console.error('[PERF] Error opening camera:', error);
+                  setValidationError(
+                    error instanceof Error ? error.message : 'Failed to open camera'
+                  );
+                  setShowCamera(false);
+                } finally {
+                  isProcessingRef.current = false;
+                  setIsProcessing(false);
+                }
+              }}
+            >
+              {isProcessing && processingMessage === 'Opening camera...' ? (
+                <View style={styles.loadingContainer}>
+                  <ActivityIndicator size="small" color="#fff" style={styles.spinner} />
+                  <Text style={styles.primaryButtonText}>{processingMessage}</Text>
+                </View>
+              ) : (
+                <Text style={styles.primaryButtonText}>Begin Capture</Text>
+              )}
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {/* Active Session Section */}
+        {beforeTaken && !afterTaken && (
+          <View style={styles.activeSessionContainer}>
+            {/* Session Status Card */}
+            <View style={[styles.card, styles.sessionStatusCard]}>
+              <View style={styles.sessionStatusHeader}>
+                <Ionicons name="lock-closed" size={24} color="#10b981" />
+                <Text style={styles.sessionStatusTitle}>Session Active</Text>
+              </View>
+              <Text style={styles.sessionStatusText}>
+                Before photo captured. You must complete this session.
+              </Text>
+
+              {/* Before Photo Info */}
+              <View style={styles.photoInfoCard}>
+                <Ionicons name="image" size={20} color="#3b82f6" />
+                <View style={styles.photoInfoContent}>
+                  <Text style={styles.photoInfoLabel}>Before Photo</Text>
+                  <Text style={styles.photoInfoStatus}>✅ Locked</Text>
+                </View>
+              </View>
+
+              {/* Location Info */}
+              {beforeLocation && (
+                <View style={styles.photoInfoCard}>
+                  <Ionicons name="location" size={20} color="#0ea5e9" />
+                  <View style={styles.photoInfoContent}>
+                    <Text style={styles.photoInfoLabel}>Location</Text>
+                    <Text style={styles.photoInfoValue} numberOfLines={1} ellipsizeMode="tail">
+                      {beforeLocation.latitude.toFixed(5)}, {beforeLocation.longitude.toFixed(5)}
+                    </Text>
+                  </View>
+                </View>
+              )}
+
+              {/* Session ID */}
+              {activeSession && (
+                <View style={styles.photoInfoCard}>
+                  <Ionicons name="key" size={20} color="#0ea5e9" />
+                  <View style={styles.photoInfoContent}>
+                    <Text style={styles.photoInfoLabel}>Session ID</Text>
+                    <Text style={styles.photoInfoValue}>{activeSession.id.substring(0, 12)}...</Text>
+                  </View>
+                </View>
+              )}
+
+              {/* Time Window Status */}
+              {timeWindow && (
+                <View style={[styles.photoInfoCard, styles.timeWindowStatusCard]}>
+                  <Ionicons name="time" size={20} color="#0ea5e9" />
+                  <View style={styles.photoInfoContent}>
+                    <Text style={styles.photoInfoLabel}>Time Window</Text>
+                    <Text style={styles.photoInfoValue}>
+                      {selectedMinTimeMin}–{selectedMaxTimeMin} min
+                    </Text>
+                    <Text style={styles.photoInfoSubValue}>
+                      Elapsed: {(elapsedTimeMs / 1000).toFixed(1)}s
+                    </Text>
+                    {timeWindowStatus && (
+                      <Text style={[
+                        styles.timeWindowStatusBadge,
+                        timeWindowStatus === 'VALID' && styles.timeWindowStatusBadgeValid,
+                        timeWindowStatus === 'INVALID' && styles.timeWindowStatusBadgeInvalid,
+                        timeWindowStatus === 'EXPIRED' && styles.timeWindowStatusBadgeExpired,
+                      ]}>
+                        {timeWindowStatus === 'VALID' ? '✅ Ready to capture' :
+                         timeWindowStatus === 'EXPIRED' ? '❌ Expired' :
+                         '⏳ Not ready yet'}
+                      </Text>
+                    )}
+                  </View>
+                </View>
               )}
             </View>
-          )}
-        </View>
-      )}
 
-      {/* USER-DECLARED TIME WINDOW ENFORCEMENT - Time window declaration form */}
-     {!beforeTaken && !timeWindow && !showTimeWindowForm && (
-  <TouchableOpacity
-    style={styles.timeWindowButton}
-    onPress={() => {
-      setSelectedMinTimeMin(5);
-      setSelectedMaxTimeMin(10);
-      setShowTimeWindowForm(true);
-    }}
-  >
-          <Text style={styles.timeWindowButtonText}>⏱️ Set Time Window (Required)</Text>
-        </TouchableOpacity>
-      )}
+            {/* Action Buttons */}
+            <TouchableOpacity
+              style={[styles.primaryButton, (isProcessing || !timeWindow || timeWindowStatus !== 'VALID') && styles.buttonDisabled]}
+              disabled={isProcessing || !timeWindow || timeWindowStatus !== 'VALID'}
+              onPress={() => {
+                if (isProcessing || isProcessingRef.current) {
+                  console.log('[PERF] Already processing, ignoring click');
+                  return;
+                }
+                
+                setMode('after');
+                setShowCamera(true);
+              }}
+            >
+              {isProcessing ? (
+                <View style={styles.loadingContainer}>
+                  <ActivityIndicator size="small" color="#fff" style={styles.spinner} />
+                  <Text style={styles.primaryButtonText}>{processingMessage || 'Processing...'}</Text>
+                </View>
+              ) : (
+                <View style={styles.buttonContent}>
+                  <Ionicons name="camera" size={20} color="#fff" style={{ marginRight: 8 }} />
+                  <Text style={styles.primaryButtonText}>Take AFTER Photo</Text>
+                </View>
+              )}
+            </TouchableOpacity>
 
-      {showTimeWindowForm && !beforeTaken && !timeWindow && (
-        <View style={styles.timeWindowForm}>
-          <Text style={styles.formTitle}>User-Declared Time Window</Text>
-          <Text style={styles.timeWindowDescription}>
-            Define the expected time between Before and After photos. This window is immutable once a session starts.
-          </Text>
-          
-          <View style={styles.timeWindowInputContainer}>
-            <View style={styles.timeWindowInputGroup}>
-              <Text style={styles.timeWindowLabel}>Minimum Time (minutes):</Text>
-              <View style={styles.timeWindowSliderContainer}>
+            {/* Session Action Buttons */}
+            {beforeTaken && !afterTaken && activeSession?.isActive && (
+              <View style={styles.sessionActions}>
                 <TouchableOpacity
-  style={styles.timeWindowButtonMinus}
-  onPress={() => setSelectedMinTimeMin(Math.max(1, (selectedMinTimeMin ?? 1) - 1))}
->
-  <Text style={styles.timeWindowButtonText}>−</Text>
-</TouchableOpacity>
-                <TextInput
-  style={styles.timeWindowInput}
-  keyboardType="numeric"
-  value={(selectedMinTimeMin ?? 1).toString()}
-  onChangeText={(text) => {
-    const val = parseInt(text) || 1;
-    const maxVal = selectedMaxTimeMin ?? 10;
-    if (val < maxVal) {
-      setSelectedMinTimeMin(Math.max(1, val));
-    }
-  }}
-/>
-<TouchableOpacity
-  style={styles.timeWindowButtonPlus}
-  onPress={() => {
-    const minVal = selectedMinTimeMin ?? 1;
-    const maxVal = selectedMaxTimeMin ?? 10;
-    if (minVal + 1 < maxVal) {
-      setSelectedMinTimeMin(minVal + 1);
-    }
-  }}
->
-  <Text style={styles.timeWindowButtonText}>+</Text>
-</TouchableOpacity>
-              </View>
-            </View>
-
-            <View style={styles.timeWindowInputGroup}>
-              <Text style={styles.timeWindowLabel}>Maximum Time (minutes):</Text>
-              <View style={styles.timeWindowSliderContainer}>
-                <TouchableOpacity
-  style={styles.timeWindowButtonMinus}
-  onPress={() => {
-    const minVal = selectedMinTimeMin ?? 1;
-    const maxVal = selectedMaxTimeMin ?? 10;
-    if (maxVal - 1 > minVal) {
-      setSelectedMaxTimeMin(maxVal - 1);
-    }
-  }}
->
-  <Text style={styles.timeWindowButtonText}>−</Text>
-</TouchableOpacity>
-                <TextInput
-                  style={styles.timeWindowInput}
-                  keyboardType="numeric"
-                  value={(selectedMaxTimeMin ?? 10).toString()}
-                  onChangeText={(text) => {
-                    const minVal = selectedMinTimeMin ?? 1;
-                    const val = parseInt(text) || minVal + 1;
-                    if (val > minVal) {
-                      setSelectedMaxTimeMin(Math.max(minVal + 1, val));
-                    }
+                  style={styles.secondaryButton}
+                  onPress={async () => {
+                    await abandonSession();
                   }}
-                />
-                <TouchableOpacity
-  style={styles.timeWindowButtonPlus}
-  onPress={() => setSelectedMaxTimeMin((selectedMaxTimeMin ?? 10) + 1)}
->
-  <Text style={styles.timeWindowButtonText}>+</Text>
-</TouchableOpacity>
-              </View>
-            </View>
-          </View>
-
-          <Text style={styles.timeWindowInfo}>
-            Window: {selectedMinTimeMin}–{selectedMaxTimeMin} minutes
-          </Text>
-          <Text style={styles.timeWindowWarning}>
-            ⚠️ These values cannot be changed once the session starts.
-          </Text>
-          
-          <TouchableOpacity
-  style={styles.saveButton}
-  onPress={() => {
-    if (selectedMinTimeMin !== null && selectedMaxTimeMin !== null && 
-        selectedMinTimeMin > 0 && selectedMaxTimeMin > 0 && 
-        selectedMinTimeMin < selectedMaxTimeMin) {
-      // USER-DECLARED TIME WINDOW ENFORCEMENT - Unlock Before capture by setting time window
-      const minTimeMs = selectedMinTimeMin * 60 * 1000;
-      const maxTimeMs = selectedMaxTimeMin * 60 * 1000;
-      const timeWindowData: TimeWindowData = {
-        minTimeMs,
-        maxTimeMs,
-        actualElapsedMs: 0,
-        timeSource: getTimeSource(),
-        timeVerificationStatus: 'INVALID',
-        createdAt: new Date().toISOString(),
-      };
-      setTimeWindow(timeWindowData);
-      setElapsedTimeMs(0);
-      setTimeWindowStatus('INVALID');
-      setTimeAnomalies([]);
-      setShowTimeWindowForm(false);
-    } else {
-      setValidationError('Please select valid min and max times');
-    }
-  }}
->
-  <Text style={styles.saveButtonText}>Proceed with Time Window</Text>
-</TouchableOpacity>
-
-          <TouchableOpacity
-  style={styles.cancelFormButton}
-  onPress={() => {
-    setShowTimeWindowForm(false);
-    setSelectedMinTimeMin(null);
-    setSelectedMaxTimeMin(null);
-  }}
->
-            <Text style={styles.cancelFormButtonText}>Cancel</Text>
-          </TouchableOpacity>
-        </View>
-      )}
-
-      {!beforeTaken && (
-        <TouchableOpacity
-          style={[styles.button, (isProcessing || !timeWindow) && styles.buttonDisabled]}
-    disabled={isProcessing || !timeWindow}
-          onPress={async () => {
-            // PERFORMANCE FIX 1 - Debounce protection
-            if (isProcessing || isProcessingRef.current) {
-              console.log('[PERF] Button already processing, ignoring click');
-              return;
-            }
-
-            isProcessingRef.current = true;
-            setIsProcessing(true);
-            setProcessingMessage('Opening camera...');
-
-            try {
-              console.log('[PERF] "Take BEFORE photo" button clicked:', Date.now());
-
-              // PERFORMANCE FIX 2 - Fetch GPS in background, don't block camera open
-              // Set job site location immediately without waiting
-              if (!jobSiteLocation) {
-                // Start GPS fetch in background (don't await)
-                fetchGPSWithFallback(5000).then((gpsData) => {
-                  if (gpsData) {
-                    setJobSiteLocation(gpsData);
-                    console.log('[PERF] Job site location set:', gpsData);
-                  }
-                }).catch((err) => {
-                  console.log('[PERF] Background GPS fetch failed:', err);
-                });
-              }
-
-              setMode('before');
-              setShowCamera(true);
-              setProcessingMessage(null);
-            } catch (error) {
-              console.error('[PERF] Error opening camera:', error);
-              setValidationError(
-                error instanceof Error ? error.message : 'Failed to open camera'
-              );
-              setShowCamera(false);
-            } finally {
-              isProcessingRef.current = false;
-              setIsProcessing(false);
-            }
-          }}
-        >
-          {isProcessing && processingMessage === 'Opening camera...' ? (
-            <View style={styles.loadingContainer}>
-              <ActivityIndicator size="small" color="#fff" style={styles.spinner} />
-              <Text style={styles.buttonText}>{processingMessage}</Text>
-            </View>
-          ) : (
-            <Text style={styles.buttonText}>Take BEFORE photo</Text>
-          )}
-        </TouchableOpacity>
-      )}
-
-      {beforeTaken && !afterTaken && (
-        <>
-          <Text style={styles.status}>Before locked ✅</Text>
-          {beforeLocation && (
-            <Text style={styles.meta}>
-              Location: {beforeLocation.latitude.toFixed(5)}, {beforeLocation.longitude.toFixed(5)}
-            </Text>
-          )}
-          {/* PAIRED SESSION LOCKING - Show session details */}
-          {activeSession && (
-            <Text style={styles.sessionId}>
-              Session ID: {activeSession.id.substring(0, 8)}...
-            </Text>
-          )}
-
-          {/* UI/UX - Show cooldown message if within 1-minute window */}
-       
-
-          <TouchableOpacity
-            style={[styles.button, (isProcessing || !timeWindow || timeWindowStatus !== 'VALID') && styles.buttonDisabled]}
-            disabled={isProcessing || !timeWindow || timeWindowStatus !== 'VALID'}
-            onPress={() => {
-              // PERFORMANCE FIX 1 - Debounce protection
-              if (isProcessing || isProcessingRef.current) {
-                console.log('[PERF] Already processing, ignoring click');
-                return;
-              }
-              
-              setMode('after');
-              setShowCamera(true);
-            }}
-          >
-            {isProcessing ? (
-              <View style={styles.loadingContainer}>
-                <ActivityIndicator size="small" color="#fff" style={styles.spinner} />
-                <Text style={styles.buttonText}>{processingMessage || 'Processing...'}</Text>
-              </View>
-            ) : (
-              <Text style={styles.buttonText}>Take AFTER photo</Text>
-            )}
-          </TouchableOpacity>
-
-          {/* UI/UX - Show session actions ONLY when before photo is taken but NOT completed */}
-          {beforeTaken && !afterTaken && activeSession?.isActive && (
-            <View style={styles.sessionActions}>
-              <TouchableOpacity
-                style={styles.cancelButton}
-                onPress={async () => {
-                  await abandonSession();
-                }}
-              >
-                <Text style={styles.cancelButtonText}>Cancel Session</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={styles.deleteButton}
-                onPress={async () => {
-  console.log('⛔ CHEAT ATTEMPT DETECTED at:', new Date().toISOString());
-  
-  if (!activeSession?.id) return;
-  
-  console.log('Attempting to show Alert...');
-  
-  try {
-    Alert.alert(
-      'Delete Before Photo?',
-      'This will mark the entire session as "TAMPERED" and void any proof.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { 
-          text: 'Delete & Void Session', 
-          style: 'destructive',
-          onPress: async () => {
-            console.log('User confirmed delete');
-            await logTamperEvent('before_deleted', activeSession.id, undefined, 'User deleted before photo, voiding session');
-            await completeSession();
-            setBeforeUri(null);
-            setBeforeTaken(false);
-            setMetadata(null);
-            setBeforeLocation(null);
-            alert('❌ Session voided due to before photo deletion. Audit trail shows TAMPERED flag.');
-          }
-        }
-      ]
-    );
-    console.log('Alert function called successfully');
-  } catch (error) {
-    console.error('Alert failed:', error);
-    await logTamperEvent('before_deleted', activeSession.id, undefined, 'Alert failed, auto-logged tamper');
-    alert('Session marked as tampered');
-  }
-}}
                 >
-                  <Text style={styles.deleteButtonText}>🗑️ Delete Before</Text>
+                  <Ionicons name="close-circle" size={18} color="#ef4444" style={{ marginRight: 6 }} />
+                  <Text style={styles.secondaryButtonText}>Cancel Session</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={styles.dangerButton}
+                  onPress={async () => {
+                    if (!activeSession?.id) return;
+                    
+                    Alert.alert(
+                      'Delete Before Photo?',
+                      'This will mark the entire session as "TAMPERED" and void any proof.',
+                      [
+                        { text: 'Cancel', style: 'cancel' },
+                        { 
+                          text: 'Delete & Void Session', 
+                          style: 'destructive',
+                          onPress: async () => {
+                            await logTamperEvent('before_deleted', activeSession.id, undefined, 'User deleted before photo, voiding session');
+                            await completeSession();
+                            setBeforeUri(null);
+                            setBeforeTaken(false);
+                            setMetadata(null);
+                            setBeforeLocation(null);
+                            alert('❌ Session voided due to before photo deletion. Audit trail shows TAMPERED flag.');
+                          }
+                        }
+                      ]
+                    );
+                  }}
+                >
+                  <Ionicons name="trash" size={18} color="#ef4444" style={{ marginRight: 6 }} />
+                  <Text style={styles.dangerButtonText}>Delete Before</Text>
                 </TouchableOpacity>
               </View>
             )}
-        </>
-      )}
+          </View>
+        )}
 
-      {validationError && (
-        <View style={styles.errorContainer}>
-          <Text style={styles.errorText}>{validationError}</Text>
-        </View>
-      )}
+        {/* Validation Error */}
+        {validationError && (
+          <View style={styles.errorCard}>
+            <Ionicons name="alert-circle" size={20} color="#ef4444" style={{ marginRight: 8 }} />
+            <Text style={styles.errorText}>{validationError}</Text>
+          </View>
+        )}
 
-      {beforeTaken && afterTaken && metadata && (
-        <>
-          <Text style={styles.status}>Proof unit complete ✅</Text>
-          <Text style={styles.meta}>{metadata.timestamp}</Text>
-          <Text style={styles.meta}>{metadata.device}</Text>
-        </>
-      )}
+        {/* Completion Status */}
+        {beforeTaken && afterTaken && metadata && (
+          <View style={[styles.card, styles.successCard]}>
+            <View style={styles.successIconContainer}>
+              <Ionicons name="checkmark-circle" size={48} color="#10b981" />
+            </View>
+            <Text style={styles.successTitle}>Proof Complete</Text>
+            <Text style={styles.successText}>{metadata.timestamp}</Text>
+            <Text style={styles.successText}>{metadata.device}</Text>
+          </View>
+        )}
 
-      {/* UI/UX - Tamper warning only visible when relevant to user (in idle state with tampered sessions) */}
-      {!activeSession && !beforeTaken && tamperWarnings.length > 0 && (
-        <View style={styles.tamperWarning}>
-          <Text style={styles.tamperWarningText}>⚠️ {tamperWarnings.length} TAMPERED SESSION(S)</Text>
-          <Text style={styles.meta}>Check export for audit trail</Text>
-        </View>
-      )}
+        {/* Tamper Warning */}
+        {!activeSession && !beforeTaken && tamperWarnings.length > 0 && (
+          <View style={[styles.card, styles.warningCard]}>
+            <View style={styles.warningHeader}>
+              <Ionicons name="warning" size={24} color="#f97316" />
+              <Text style={styles.warningTitle}>{tamperWarnings.length} Tampered Sessions</Text>
+            </View>
+            <Text style={styles.warningText}>Check export for detailed audit trail</Text>
+          </View>
+        )}
 
-      {/* UI/UX - Export button only visible when data exists */}
-      {hasExportData && (
-        <TouchableOpacity
-          style={styles.exportButton}
-          onPress={exportAuditTrail}
-        >
-          <Text style={styles.exportButtonText}>📋 Export Audit Trail</Text>
-        </TouchableOpacity>
-      )}
-    </View>
+        {/* Export Button */}
+        {hasExportData && (
+          <TouchableOpacity
+            style={[styles.card, styles.exportCard]}
+            onPress={exportAuditTrail}
+          >
+            <View style={styles.exportHeader}>
+              <Ionicons name="download" size={20} color="#3b82f6" />
+              <Text style={styles.exportTitle}>Export Audit Trail</Text>
+            </View>
+            <Text style={styles.exportText}>Download all proofs and verification data</Text>
+          </TouchableOpacity>
+        )}
+
+        {/* Bottom Spacing */}
+        <View style={styles.bottomSpacer} />
+      </ScrollView>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
+  // Safe Area & Layout
+  safeArea: {
     flex: 1,
-    backgroundColor: '#000',
+    backgroundColor: '#f8fafc',
+  },
+  scrollView: {
+    flex: 1,
+  },
+  scrollContent: {
+    padding: 16,
+    paddingBottom: 100,
+  },
+  
+  // Welcome Screen
+  welcomeContainer: {
+    justifyContent: 'center',
+    backgroundColor: '#0ea5e9',
+  },
+  welcomeContent: {
     alignItems: 'center',
     justifyContent: 'center',
-    padding: 20,
+    paddingHorizontal: 24,
   },
-  title: {
-    color: '#fff',
-    fontSize: 26,
-    marginBottom: 10,
-    fontWeight: 'bold',
+  welcomeIcon: {
+    marginBottom: 24,
   },
-  subtitle: {
-    color: '#0f0',
-    fontSize: 14,
-    marginBottom: 30,
+  welcomeTitle: {
+    fontSize: 32,
+    fontWeight: '700',
+    color: '#ffffff',
+    marginBottom: 8,
+    textAlign: 'center',
   },
-  text: {
-    color: '#fff',
+  welcomeSubtitle: {
     fontSize: 18,
-    marginBottom: 20,
+    fontWeight: '600',
+    color: '#ffffff',
+    opacity: 0.9,
+    marginBottom: 16,
+    textAlign: 'center',
   },
-  status: {
-    color: '#0f0',
-    fontSize: 18,
-    marginBottom: 20,
-  },
-  meta: {
-    color: '#aaa',
-    fontSize: 14,
-    marginTop: 4,
-  },
-  hash: {
-    color: '#0ff',
-    fontSize: 12,
-    marginBottom: 20,
-    fontFamily: 'monospace',
-  },
-  button: {
-    backgroundColor: '#1e90ff',
-    paddingVertical: 14,
-    paddingHorizontal: 20,
-    borderRadius: 8,
-    marginTop: 10,
-  },
-  buttonDisabled: {
-    backgroundColor: '#666',
-    opacity: 0.6,
-  },
-  buttonText: {
-    color: '#fff',
+  welcomeDescription: {
     fontSize: 16,
+    color: '#ffffff',
+    opacity: 0.85,
+    textAlign: 'center',
+    marginBottom: 40,
+    lineHeight: 24,
   },
-  // PERFORMANCE FIX - Loading indicator styles
-  loadingContainer: {
+  proceedButton: {
+    flexDirection: 'row',
+    backgroundColor: '#ffffff',
+    paddingVertical: 16,
+    paddingHorizontal: 40,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
+    elevation: 5,
+  },
+  proceedButtonText: {
+    color: '#0ea5e9',
+    fontSize: 18,
+    fontWeight: '600',
+  },
+  proceedButtonIcon: {
+    marginLeft: 8,
+  },
+
+  // Permission Screen
+  permissionContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 24,
+  },
+  permissionIcon: {
+    marginBottom: 24,
+  },
+  permissionTitle: {
+    fontSize: 24,
+    fontWeight: '700',
+    color: '#1e293b',
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  permissionText: {
+    fontSize: 16,
+    color: '#64748b',
+    textAlign: 'center',
+    marginBottom: 32,
+  },
+
+  // Header
+  header: {
+    marginBottom: 24,
+    marginTop: 8,
+  },
+  headerTitle: {
+    fontSize: 28,
+    fontWeight: '700',
+    color: '#1e293b',
+    marginBottom: 4,
+  },
+  headerSubtitle: {
+    fontSize: 14,
+    color: '#64748b',
+    fontWeight: '500',
+  },
+
+  // Cards
+  card: {
+    backgroundColor: '#ffffff',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 12,
+    elevation: 3,
+  },
+  cardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  cardTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#1e293b',
+    marginLeft: 8,
+  },
+  cardText: {
+    fontSize: 14,
+    color: '#64748b',
+    lineHeight: 20,
+  },
+
+  // Form Card
+  formCard: {
+    paddingBottom: 24,
+  },
+
+  // Info Card
+  infoCard: {
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+  },
+  infoBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    backgroundColor: '#f0f9ff',
+    borderRadius: 8,
+    marginBottom: 8,
+  },
+  infoBadgeText: {
+    fontSize: 13,
+    color: '#3b82f6',
+    marginLeft: 8,
+    fontWeight: '500',
+  },
+
+  // Main Action Card
+  mainActionCard: {
+    alignItems: 'center',
+    paddingVertical: 32,
+    paddingHorizontal: 24,
+    backgroundColor: '#f0f9ff',
+    borderWidth: 2,
+    borderColor: '#dbeafe',
+  },
+  mainActionIconContainer: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: '#e0f2fe',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 16,
+  },
+  mainActionTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#1e293b',
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  mainActionDescription: {
+    fontSize: 14,
+    color: '#64748b',
+    textAlign: 'center',
+    marginBottom: 24,
+    lineHeight: 20,
+  },
+
+  // Buttons
+  primaryButton: {
+    backgroundColor: '#3b82f6',
+    paddingVertical: 14,
+    paddingHorizontal: 24,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 48,
+    marginTop: 12,
+    shadowColor: '#3b82f6',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  primaryButtonText: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  buttonContent: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  spinner: {
-    marginRight: 8,
-  },
-  captureButtonDisabled: {
-    opacity: 0.5,
-  },
-  cancelButton: {
+
+  secondaryButton: {
     backgroundColor: 'transparent',
-    paddingVertical: 10,
-    paddingHorizontal: 16,
-    borderRadius: 6,
-    marginTop: 12,
-    borderWidth: 1,
-    borderColor: '#666',
-  },
-  cancelButtonText: {
-    color: '#999',
-    fontSize: 14,
-  },
-  errorContainer: {
-    marginTop: 16,
-    marginBottom: 16,
-    padding: 12,
+    borderWidth: 2,
+    borderColor: '#e2e8f0',
+    paddingVertical: 12,
+    paddingHorizontal: 24,
     borderRadius: 8,
-    backgroundColor: '#2a0000',
-    borderWidth: 1,
-    borderColor: '#f00',
-    maxWidth: '90%',
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 48,
+    marginTop: 12,
   },
-  errorText: {
-    color: '#f00',
+  secondaryButtonText: {
+    color: '#64748b',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+
+  dangerButton: {
+    backgroundColor: 'transparent',
+    borderWidth: 2,
+    borderColor: '#fee2e2',
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 48,
+    flex: 1,
+    flexDirection: 'row',
+    marginTop: 12,
+  },
+  dangerButtonText: {
+    color: '#ef4444',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+
+  buttonDisabled: {
+    backgroundColor: '#cbd5e1',
+    opacity: 0.6,
+  },
+
+  // Input Fields
+  input: {
+    backgroundColor: '#f1f5f9',
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    borderRadius: 8,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    fontSize: 16,
+    color: '#1e293b',
+    marginBottom: 12,
+    minHeight: 48,
+  },
+
+  // Time Window
+  timeWindowDescription: {
+    color: '#64748b',
+    fontSize: 13,
+    marginBottom: 16,
+    textAlign: 'center',
+    fontStyle: 'italic',
+    lineHeight: 18,
+  },
+  timeWindowInputContainer: {
+    marginBottom: 16,
+  },
+  timeWindowInputGroup: {
+    marginBottom: 16,
+  },
+  timeWindowLabel: {
+    color: '#1e293b',
+    fontSize: 13,
+    fontWeight: '600',
+    marginBottom: 8,
+  },
+  timeWindowSliderContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
+  spinButton: {
+    backgroundColor: '#f1f5f9',
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    minWidth: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  spinButtonText: {
+    color: '#3b82f6',
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  timeWindowInput: {
+    backgroundColor: '#f1f5f9',
+    color: '#1e293b',
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 6,
+    flex: 1,
+    textAlign: 'center',
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  timeWindowInfo: {
+    backgroundColor: '#f0f9ff',
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 12,
+  },
+  timeWindowInfoText: {
+    color: '#1e293b',
     fontSize: 14,
     fontWeight: '600',
     textAlign: 'center',
+    marginBottom: 4,
   },
+  timeWindowWarning: {
+    color: '#f97316',
+    fontSize: 12,
+    textAlign: 'center',
+  },
+
+  // Active Session
+  activeSessionContainer: {
+    marginTop: 8,
+  },
+  sessionStatusCard: {
+    borderLeftWidth: 4,
+    borderLeftColor: '#10b981',
+    backgroundColor: '#f0fdf4',
+  },
+  sessionStatusHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  sessionStatusTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#1e293b',
+    marginLeft: 8,
+  },
+  sessionStatusText: {
+    fontSize: 14,
+    color: '#64748b',
+    lineHeight: 20,
+    marginBottom: 16,
+  },
+
+  photoInfoCard: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+    backgroundColor: '#f8fafc',
+    borderRadius: 6,
+    marginBottom: 10,
+  },
+  photoInfoContent: {
+    flex: 1,
+    marginLeft: 12,
+  },
+  photoInfoLabel: {
+    fontSize: 12,
+    color: '#64748b',
+    fontWeight: '500',
+    marginBottom: 2,
+  },
+  photoInfoValue: {
+    fontSize: 14,
+    color: '#1e293b',
+    fontWeight: '600',
+    marginBottom: 2,
+  },
+  photoInfoStatus: {
+    fontSize: 13,
+    color: '#10b981',
+    fontWeight: '600',
+  },
+  photoInfoSubValue: {
+    fontSize: 12,
+    color: '#64748b',
+    marginTop: 2,
+  },
+
+  timeWindowStatusCard: {
+    borderBottomWidth: 1,
+    borderBottomColor: '#e2e8f0',
+    paddingBottom: 16,
+  },
+  timeWindowStatusBadge: {
+    fontSize: 11,
+    fontWeight: '600',
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+    borderRadius: 4,
+    marginTop: 6,
+    overflow: 'hidden',
+    alignSelf: 'flex-start',
+  },
+  timeWindowStatusBadgeValid: {
+    backgroundColor: '#dcfce7',
+    color: '#16a34a',
+  },
+  timeWindowStatusBadgeInvalid: {
+    backgroundColor: '#fef3c7',
+    color: '#d97706',
+  },
+  timeWindowStatusBadgeExpired: {
+    backgroundColor: '#fee2e2',
+    color: '#dc2626',
+  },
+
+  // Session Actions
+  sessionActions: {
+    flexDirection: 'row',
+    gap: 12,
+    marginTop: 16,
+  },
+
+  // Error Card
+  errorCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#fee2e2',
+    borderWidth: 1,
+    borderColor: '#fecaca',
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 16,
+  },
+  errorText: {
+    color: '#b91c1c',
+    fontSize: 13,
+    fontWeight: '600',
+    flex: 1,
+    marginLeft: 8,
+    lineHeight: 18,
+  },
+
+  // Success Card
+  successCard: {
+    alignItems: 'center',
+    backgroundColor: '#f0fdf4',
+    borderLeftWidth: 4,
+    borderLeftColor: '#10b981',
+  },
+  successIconContainer: {
+    marginBottom: 16,
+  },
+  successTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#1e293b',
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  successText: {
+    fontSize: 13,
+    color: '#64748b',
+    textAlign: 'center',
+    marginBottom: 4,
+  },
+
+  // Warning Card
+  warningCard: {
+    backgroundColor: '#fffbeb',
+    borderLeftWidth: 4,
+    borderLeftColor: '#f97316',
+  },
+  warningHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  warningTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#1e293b',
+    marginLeft: 8,
+  },
+  warningText: {
+    fontSize: 13,
+    color: '#64748b',
+  },
+
+  // Export Card
+  exportCard: {
+    backgroundColor: '#f0f9ff',
+    borderLeftWidth: 4,
+    borderLeftColor: '#3b82f6',
+  },
+  exportHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  exportTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#1e293b',
+    marginLeft: 8,
+  },
+  exportText: {
+    fontSize: 13,
+    color: '#64748b',
+  },
+
+  // Camera
   captureContainer: {
     position: 'absolute',
     bottom: 40,
@@ -1981,206 +2566,265 @@ const styles = StyleSheet.create({
     width: 72,
     height: 72,
     borderRadius: 36,
-    backgroundColor: '#fff',
+    backgroundColor: '#ffffff',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 5,
   },
-  // PAIRED SESSION LOCKING - Session styles
+  captureButtonDisabled: {
+    opacity: 0.5,
+  },
+
+  // Loading
+  loadingContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  spinner: {
+    marginRight: 8,
+  },
+
+  // Bottom Spacer
+  bottomSpacer: {
+    height: 40,
+  },
+
+  // Legacy styles (kept for reference, not actively used)
+  container: {
+    flex: 1,
+    backgroundColor: '#f8fafc',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 20,
+  },
+  title: {
+    color: '#1e293b',
+    fontSize: 26,
+    marginBottom: 10,
+    fontWeight: 'bold',
+  },
+  subtitle: {
+    color: '#64748b',
+    fontSize: 14,
+    marginBottom: 30,
+  },
+  text: {
+    color: '#1e293b',
+    fontSize: 18,
+    marginBottom: 20,
+  },
+  status: {
+    color: '#10b981',
+    fontSize: 18,
+    marginBottom: 20,
+  },
+  meta: {
+    color: '#64748b',
+    fontSize: 14,
+    marginTop: 4,
+  },
+  hash: {
+    color: '#0ea5e9',
+    fontSize: 12,
+    marginBottom: 20,
+    fontFamily: 'monospace',
+  },
+  button: {
+    backgroundColor: '#3b82f6',
+    paddingVertical: 14,
+    paddingHorizontal: 20,
+    borderRadius: 8,
+    marginTop: 10,
+  },
+  buttonText: {
+    color: '#fff',
+    fontSize: 16,
+  },
   sessionInfo: {
-    backgroundColor: '#1a2a3a',
+    backgroundColor: '#f0fdf4',
     padding: 12,
     borderRadius: 8,
     marginBottom: 20,
     borderWidth: 1,
-    borderColor: '#0f0',
+    borderColor: '#dcfce7',
     maxWidth: '90%',
   },
   sessionText: {
-    color: '#0f0',
+    color: '#10b981',
     fontSize: 16,
     fontWeight: 'bold',
     textAlign: 'center',
   },
   sessionSubtext: {
-    color: '#aaa',
+    color: '#64748b',
     fontSize: 12,
     textAlign: 'center',
     marginTop: 4,
   },
   sessionId: {
-    color: '#0ff',
+    color: '#0ea5e9',
     fontSize: 12,
     fontFamily: 'monospace',
     marginBottom: 15,
-    backgroundColor: '#1a1a1a',
+    backgroundColor: '#f1f5f9',
     padding: 6,
     borderRadius: 4,
   },
-  cooldownText: {
-    color: '#ffaa00',
-    fontSize: 14,
-    fontWeight: 'bold',
-    textAlign: 'center',
-  },
-  cooldownSubtext: {
-    color: '#aaa',
-    fontSize: 12,
-    textAlign: 'center',
-    marginTop: 4,
-  },
-
-
-
-  violationWarning: {
-    backgroundColor: '#3a2a00',
-    padding: 12,
-    borderRadius: 8,
-    marginTop: 10,
-    marginBottom: 10,
-    borderWidth: 1,
-    borderColor: '#ffaa00',
-    maxWidth: '90%',
-  },
-  violationWarningText: {
-    color: '#ffaa00',
-    fontSize: 14,
-    fontWeight: 'bold',
-    textAlign: 'center',
-  },
-  // USER-DECLARED TIME WINDOW ENFORCEMENT - Time window UI styles
-  timeWindowButton: {
-    backgroundColor: '#2a3a5a',
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    borderRadius: 6,
-    marginBottom: 20,
-    borderWidth: 1,
-    borderColor: '#4a5a7a',
-  },
-  timeWindowButtonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: 'bold',
-  },
-  timeWindowForm: {
-    backgroundColor: '#1a1a1a',
-    padding: 16,
-    borderRadius: 8,
-    marginBottom: 20,
-    width: '90%',
-    borderWidth: 2,
-    borderColor: '#4a6a9a',
-  },
-  timeWindowDescription: {
-    color: '#aaa',
-    fontSize: 12,
-    marginBottom: 16,
-    textAlign: 'center' as any,
-    fontStyle: 'italic' as any,
-  },
-  timeWindowInputContainer: {
-    marginBottom: 16,
-  },
-  timeWindowInputGroup: {
-    marginBottom: 16,
-  },
-  timeWindowLabel: {
-    color: '#0ff',
-    fontSize: 13,
-    fontWeight: '600' as any,
+  sessionIconContainer: {
     marginBottom: 8,
-  },
-  timeWindowSliderContainer: {
-    flexDirection: 'row' as any,
     alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 8,
   },
-  timeWindowButtonMinus: {
-    backgroundColor: '#2a2a2a',
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    borderRadius: 4,
-    borderWidth: 1,
-    borderColor: '#444',
-  },
-  timeWindowButtonPlus: {
-    backgroundColor: '#2a2a2a',
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    borderRadius: 4,
-    borderWidth: 1,
-    borderColor: '#444',
-  },
-  timeWindowInput: {
-    backgroundColor: '#2a2a2a',
-    color: '#0ff',
-    padding: 10,
-    borderRadius: 4,
+  timeWindowContent: {
     flex: 1,
-    textAlign: 'center' as any,
-    borderWidth: 1,
-    borderColor: '#444',
-    fontWeight: 'bold' as any,
   },
-  timeWindowInfo: {
-    color: '#0ff',
-    fontSize: 14,
-    fontWeight: 'bold' as any,
-    textAlign: 'center' as any,
-    marginBottom: 8,
-    backgroundColor: '#1a3a3a',
-    padding: 8,
-    borderRadius: 4,
+  timeWindowRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 4,
   },
-  timeWindowWarning: {
-    color: '#ffaa00',
-    fontSize: 12,
-    textAlign: 'center' as any,
-    marginBottom: 12,
+  timeWindowIcon: {
+    marginRight: 6,
   },
   timeWindowBanner: {
-    backgroundColor: '#2a3a2a',
+    backgroundColor: '#f0f9ff',
     padding: 10,
     borderRadius: 6,
     marginTop: 8,
     borderWidth: 1,
-    borderColor: '#4a7a4a',
+    borderColor: '#dbeafe',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
   },
   timeWindowText: {
-    color: '#0f0',
+    color: '#0ea5e9',
     fontSize: 13,
-    fontWeight: 'bold' as any,
-    textAlign: 'center' as any,
+    fontWeight: '600',
   },
   timeWindowSubtext: {
-    color: '#aaa',
+    color: '#64748b',
     fontSize: 11,
-    textAlign: 'center' as any,
     marginTop: 4,
   },
   timeWindowStatus: {
     fontSize: 12,
-    fontWeight: 'bold' as any,
-    textAlign: 'center' as any,
+    fontWeight: '600',
+    textAlign: 'center',
     marginTop: 6,
     padding: 4,
     borderRadius: 4,
   },
   timeWindowStatusValid: {
-    color: '#0f0',
-    backgroundColor: '#1a3a1a',
+    color: '#10b981',
+    backgroundColor: '#f0fdf4',
   },
   timeWindowStatusInvalid: {
-    color: '#ffaa00',
-    backgroundColor: '#3a3a1a',
+    color: '#f97316',
+    backgroundColor: '#fffbeb',
   },
   timeWindowStatusExpired: {
-    color: '#ff0000',
-    backgroundColor: '#3a1a1a',
+    color: '#ef4444',
+    backgroundColor: '#fee2e2',
   },
-  sessionActions: {
-    flexDirection: 'row',
-    gap: 10,
+  cooldownText: {
+    color: '#f97316',
+    fontSize: 14,
+    fontWeight: 'bold',
+    textAlign: 'center',
+  },
+  cooldownSubtext: {
+    color: '#64748b',
+    fontSize: 12,
+    textAlign: 'center',
+    marginTop: 4,
+  },
+  violationWarning: {
+    backgroundColor: '#fffbeb',
+    padding: 12,
+    borderRadius: 8,
+    marginTop: 10,
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: '#fbbf24',
+    maxWidth: '90%',
+  },
+  violationWarningText: {
+    color: '#f97316',
+    fontSize: 14,
+    fontWeight: 'bold',
+    textAlign: 'center',
+  },
+  timeWindowButton: {
+    backgroundColor: '#f0f9ff',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 6,
+    marginBottom: 20,
+    borderWidth: 1,
+    borderColor: '#dbeafe',
+  },
+  timeWindowButtonText: {
+    color: '#0ea5e9',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  timeWindowForm: {
+    backgroundColor: '#f8fafc',
+    padding: 16,
+    borderRadius: 8,
+    marginBottom: 20,
+    width: '90%',
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+  },
+  timeWindowButtonMinus: {
+    backgroundColor: '#f1f5f9',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 4,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+  },
+  timeWindowButtonPlus: {
+    backgroundColor: '#f1f5f9',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 4,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+  },
+  tamperWarning: {
+    backgroundColor: '#fee2e2',
+    padding: 12,
+    borderRadius: 8,
+    marginTop: 15,
+    marginBottom: 15,
+    borderWidth: 1,
+    borderColor: '#fecaca',
+    maxWidth: '90%',
+  },
+  tamperWarningText: {
+    color: '#b91c1c',
+    fontSize: 14,
+    fontWeight: 'bold',
+    textAlign: 'center',
+  },
+  cancelButton: {
+    backgroundColor: 'transparent',
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderRadius: 6,
     marginTop: 12,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+  },
+  cancelButtonText: {
+    color: '#64748b',
+    fontSize: 14,
+    fontWeight: '600',
   },
   deleteButton: {
     backgroundColor: 'transparent',
@@ -2188,114 +2832,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     borderRadius: 6,
     borderWidth: 1,
-    borderColor: '#ff4444',
+    borderColor: '#fee2e2',
   },
   deleteButtonText: {
-    color: '#ff4444',
+    color: '#ef4444',
     fontSize: 14,
     fontWeight: '600',
-  },
-  tamperWarning: {
-    backgroundColor: '#3a0000',
-    padding: 12,
-    borderRadius: 8,
-    marginTop: 15,
-    marginBottom: 15,
-    borderWidth: 1,
-    borderColor: '#ff0000',
-    maxWidth: '90%',
-  },
-  tamperWarningText: {
-    color: '#ff4444',
-    fontSize: 14,
-    fontWeight: 'bold',
-    textAlign: 'center',
-  },
-  // AUDIT TRAIL - Added styles (NEW)
-  metadataButton: {
-    backgroundColor: '#2a3a4a',
-    paddingVertical: 10,
-    paddingHorizontal: 16,
-    borderRadius: 6,
-    marginBottom: 20,
-    borderWidth: 1,
-    borderColor: '#3a4a5a',
-  },
-  metadataButtonText: {
-    color: '#aaa',
-    fontSize: 14,
-  },
-  metadataForm: {
-    backgroundColor: '#1a1a1a',
-    padding: 16,
-    borderRadius: 8,
-    marginBottom: 20,
-    width: '90%',
-    borderWidth: 1,
-    borderColor: '#333',
-  },
-  formTitle: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: 'bold',
-    marginBottom: 12,
-  },
-  input: {
-    backgroundColor: '#2a2a2a',
-    color: '#fff',
-    padding: 12,
-    borderRadius: 6,
-    marginBottom: 10,
-    borderWidth: 1,
-    borderColor: '#444',
-  },
-  saveButton: {
-    backgroundColor: '#1e90ff',
-    paddingVertical: 12,
-    borderRadius: 6,
-    marginTop: 8,
-  },
-  saveButtonText: {
-    color: '#fff',
-    textAlign: 'center',
-    fontSize: 16,
-  },
-  cancelFormButton: {
-    backgroundColor: 'transparent',
-    paddingVertical: 10,
-    borderRadius: 6,
-    marginTop: 8,
-  },
-  cancelFormButtonText: {
-    color: '#888',
-    textAlign: 'center',
-    fontSize: 14,
-  },
-  exportButton: {
-    backgroundColor: '#3a4a5a',
-    paddingVertical: 12,
-    paddingHorizontal: 20,
-    borderRadius: 8,
-    marginTop: 20,
-    borderWidth: 1,
-    borderColor: '#5a6a7a',
-  },
-  exportButtonText: {
-    color: '#fff',
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  jobInfo: {
-    backgroundColor: '#1a2a2a',
-    padding: 10,
-    borderRadius: 6,
-    marginBottom: 15,
-    borderWidth: 1,
-    borderColor: '#3a4a4a',
-  },
-  jobInfoText: {
-    color: '#0ff',
-    fontSize: 12,
-    textAlign: 'center',
   },
 });

@@ -5,15 +5,18 @@ import { enhanceWithLegalMetadata } from '@/lib/legalExport';
 import { generateJSONReport, generatePDFContent } from '@/lib/platformExport';
 import { ProofRecord } from '@/lib/proof';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import React from 'react';
-import { Alert, Share, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-
+import * as FileSystem from 'expo-file-system/legacy';
+import * as Sharing from 'expo-sharing';
+import React, { useState } from 'react';
+import { Alert, Modal, Share, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
 interface ExportButtonsProps {
   proof?: ProofRecord | null;
 }
 
 export function ExportButtons({ proof }: ExportButtonsProps) {
+  const [showExportModal, setShowExportModal] = useState(false);
+
   if (!proof) {
     return null;
   }
@@ -28,7 +31,7 @@ export function ExportButtons({ proof }: ExportButtonsProps) {
     }
   };
 
-      const shareVerificationCode = async () => {
+  const shareVerificationCode = async () => {
     try {
       await Share.share({
         message: `Verification Code: ${proof.verificationCode}\n\nThis work has been verified with cryptographic proof. View full report using this code.`,
@@ -38,29 +41,63 @@ export function ExportButtons({ proof }: ExportButtonsProps) {
       console.error(error);
     }
   };
-  
-  const exportJSON = async () => {
-  try {
-    const auditTrail = await getAuditTrail();
-    const report = generateJSONReport(proof, auditTrail);
-    const reportText = JSON.stringify(report, null, 2);
-    
-    await Share.share({
-      message: reportText,
-      title: `Verification Report - ${proof.verificationCode}`,
+
+  const exportJSONAsRawText = async () => {
+    try {
+      const auditTrail = await getAuditTrail();
+      const report = generateJSONReport(proof, auditTrail);
+      const reportText = JSON.stringify(report, null, 2);
       
-    });
-  } catch (error) {
-    Alert.alert('Error', 'Failed to export JSON report');
-    console.error(error);
-  }
-};
+      await Share.share({
+        message: reportText,
+        title: `Verification Report - ${proof.verificationCode}`,
+      });
+      setShowExportModal(false);
+    } catch (error) {
+      Alert.alert('Error', 'Failed to export JSON report');
+      console.error(error);
+    }
+  };
 
+  const exportJSONAsFile = async () => {
+    try {
+      const auditTrail = await getAuditTrail();
+      const report = generateJSONReport(proof, auditTrail);
+      const reportText = JSON.stringify(report, null, 2);
+      
+      const fileName = `BeforeAfter_${proof.verificationCode}.json`;
+      const fileUri = `${FileSystem.cacheDirectory}${fileName}`;
+      
+      await FileSystem.writeAsStringAsync(fileUri, reportText, {
+        encoding: FileSystem.EncodingType.UTF8,
+      });
+      
+      await Sharing.shareAsync(fileUri, {
+        mimeType: 'application/json',
+        dialogTitle: `Share Verification Report - ${proof.verificationCode}`,
+      });
+      
+      setShowExportModal(false);
+      
+      setTimeout(() => {
+        FileSystem.deleteAsync(fileUri, { idempotent: true }).catch(() => {
+          // Ignore cleanup errors
+        });
+      }, 5000);
+    } catch (error) {
+      Alert.alert('Error', 'Failed to export JSON file');
+      console.error(error);
+    }
+  };
 
- const exportPDF = async () => {
-  try {
-    const auditTrail = await getAuditTrail();
-    const html = generatePDFContent(proof, auditTrail);
+  const exportJSON = async () => {
+    setShowExportModal(true);
+  };
+
+  const exportPDF = async () => {
+    try {
+      const auditTrail = await getAuditTrail();
+      const html = generatePDFContent(proof, auditTrail);
     
     await Share.share({
       message: html,
@@ -174,6 +211,48 @@ This evidence meets cryptographic standards for digital authentication.
           🏢 Compatible with platform auto-verification systems
         </Text>
       </View>
+
+      {/* Export Options Modal */}
+      <Modal
+        visible={showExportModal}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={() => setShowExportModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>Export JSON Report</Text>
+            <Text style={styles.modalSubtitle}>Choose export format:</Text>
+            
+            <TouchableOpacity 
+              style={styles.modalOptionButton} 
+              onPress={exportJSONAsRawText}
+            >
+              <Text style={styles.modalOptionTitle}>Share as Raw Text</Text>
+              <Text style={styles.modalOptionDescription}>
+                Share JSON as plain text (current behavior)
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity 
+              style={styles.modalOptionButton} 
+              onPress={exportJSONAsFile}
+            >
+              <Text style={styles.modalOptionTitle}>Share as .json File</Text>
+              <Text style={styles.modalOptionDescription}>
+                Save as file that can be opened with BeforeAfter app
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity 
+              style={styles.modalCancelButton} 
+              onPress={() => setShowExportModal(false)}
+            >
+              <Text style={styles.modalCancelText}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -243,5 +322,74 @@ legalButtonText: {
     color: '#1e40af',
     fontSize: 12,
     marginBottom: 4,
+  },
+  // Modal styles
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  modalContent: {
+    backgroundColor: 'white',
+    borderRadius: 16,
+    padding: 24,
+    width: '100%',
+    maxWidth: 400,
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
+    elevation: 5,
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#1f2937',
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  modalSubtitle: {
+    fontSize: 14,
+    color: '#6b7280',
+    marginBottom: 20,
+    textAlign: 'center',
+  },
+  modalOptionButton: {
+    backgroundColor: '#f3f4f6',
+    borderRadius: 8,
+    padding: 16,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+  },
+  modalOptionTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#1f2937',
+    marginBottom: 4,
+  },
+  modalOptionDescription: {
+    fontSize: 12,
+    color: '#6b7280',
+    lineHeight: 16,
+  },
+  modalCancelButton: {
+    backgroundColor: '#f9fafb',
+    borderRadius: 8,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+    marginTop: 8,
+  },
+  modalCancelText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#6b7280',
+    textAlign: 'center',
   },
 });

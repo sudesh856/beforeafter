@@ -123,6 +123,7 @@ export type ProofRecord = {
   externalAnchor?: ExternalAnchor;
   timeWindow?: TimeWindowData;
   timeAnomalies?: TimeAnomaly[];
+  creatorDeviceId?: string; // Device ID of creator (prevents self-witnessing)
 };
 
 export type ProofRecordExtended = ProofRecord & {
