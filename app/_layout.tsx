@@ -38,11 +38,15 @@ export default function RootLayout() {
     // Route flow:
     // Not onboarded → onboarding screen
     // Onboarded but not on home/tabs/client-verify → go to home
+    // Fail-safe: Always allow staying on onboarding to prevent bypass loops
     if (!isOnboarded && !inOnboarding) {
       router.replace('/onboarding');
-    } else if (isOnboarded && !inHome && !inTabs && segments[0] !== 'client-verify' && segments[0] !== 'auto-verify' && segments[0] !== 'proof-display' && segments[0] !== 'proof') {
-      router.replace('/home');
     }
+    // FIX: Commented out auto-redirect to ensure user always sees the button
+    // The user requested: "User MUST click 'Proceed Ahead' button to proceed. No auto-skip."
+    /* else if (isOnboarded && !inHome && !inTabs && !inOnboarding && segments[0] !== 'client-verify' && segments[0] !== 'auto-verify' && segments[0] !== 'proof-display' && segments[0] !== 'proof') {
+      router.replace('/home');
+    } */
   }, [isOnboarded, segments]);
 
   // Navigate to auto-verify screen when a proof is imported

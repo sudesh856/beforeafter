@@ -1411,7 +1411,28 @@ export default function HomeScreen() {
   if (showCamera) {
     return (
       <View style={{ flex: 1 }}>
-        <CameraView ref={cameraRef} style={{ flex: 1 }} />
+        <CameraView ref={cameraRef} style={{ flex: 1 }}>
+          {/* FIX: Add loading overlay directly in camera view */}
+          {isProcessing && (
+            <View style={{
+              ...StyleSheet.absoluteFillObject,
+              backgroundColor: 'rgba(0,0,0,0.7)',
+              justifyContent: 'center',
+              alignItems: 'center',
+              zIndex: 9999,
+            }}>
+              <ActivityIndicator size="large" color="#ffffff" />
+              <Text style={{
+                color: '#ffffff',
+                marginTop: 20,
+                fontSize: 18,
+                fontWeight: '600'
+              }}>
+                {processingMessage || 'Processing...'}
+              </Text>
+            </View>
+          )}
+        </CameraView>
 
         <View style={styles.captureContainer}>
           <TouchableOpacity
@@ -1991,15 +2012,7 @@ export default function HomeScreen() {
             {/* Session Action Buttons */}
             {beforeTaken && !afterTaken && activeSession?.isActive && (
               <View style={styles.sessionActions}>
-                <TouchableOpacity
-                  style={styles.secondaryButton}
-                  onPress={async () => {
-                    await abandonSession();
-                  }}
-                >
-                  <Ionicons name="close-circle" size={18} color="#ef4444" style={{ marginRight: 6 }} />
-                  <Text style={styles.secondaryButtonText}>Cancel Session</Text>
-                </TouchableOpacity>
+
 
                 <TouchableOpacity
                   style={styles.dangerButton}
@@ -2685,6 +2698,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 12,
     marginTop: 16,
+    justifyContent: 'center', // Center the remaining button
   },
 
   // Error Card

@@ -2,7 +2,7 @@ import { Colors } from '@/constants/uiTheme';
 import { Ionicons } from '@expo/vector-icons';
 import { Tabs, useRouter, useSegments } from 'expo-router';
 import { useState } from 'react';
-import { Text, TouchableOpacity } from 'react-native';
+import { TouchableOpacity } from 'react-native';
 
 export default function TabLayout() {
   const [isCollapsed, setIsCollapsed] = useState(false);
@@ -10,16 +10,17 @@ export default function TabLayout() {
   const segments = useSegments();
 
   // Check which tab we're on
-  const isOnProofsTab = segments[1] === 'proofs';
+  // const isOnProofsTab = segments.length > 1 && (segments as string[])[1] === 'proofs'; // Unused
 
-  const handleBackPress = () => {
-    // From Proofs → go to Capture tab
-    router.push('/(tabs)');
-  };
+  // const handleBackPress = () => {
+  //   // From Proofs → go to Capture tab
+  //   router.push('/(tabs)');
+  // }; // Unused
 
-  // Define the tab bar style that responds to state - with proper typing
+  // Define the tab bar style - ALWAYS visible, no collapsing
+  // FIX: Removed conditional display logic that was hiding tabs
   const getTabBarStyle = () => ({
-    display: (isCollapsed ? 'none' : 'flex') as 'none' | 'flex',
+    display: 'flex' as 'flex',
     backgroundColor: Colors.surface,
     borderTopColor: Colors.border,
     borderTopWidth: 1,
@@ -42,37 +43,15 @@ export default function TabLayout() {
           color: '#fff',
         },
         headerLeft: () => (
-          // Only show back button on Proofs tab
-          isOnProofsTab ? (
-            <TouchableOpacity
-              onPress={handleBackPress}
-              style={{ marginLeft: 16, padding: 8 }}
-            >
-              <Ionicons name="arrow-back" size={24} color="#fff" />
-            </TouchableOpacity>
-          ) : null
-        ),
-        headerRight: () => (
+          // Always show back button on all tabs to allow returning to Home
           <TouchableOpacity
-            onPress={() => setIsCollapsed(!isCollapsed)}
-            style={{ 
-              marginRight: 16, 
-              padding: 8,
-              minHeight: 44,
-              justifyContent: 'center',
-              alignItems: 'center',
-            }}
+            onPress={() => router.back()} // Simple back to previous screen
+            style={{ marginLeft: 16, padding: 8 }}
           >
-            <Text style={{ 
-              fontSize: 28, 
-              color: '#9ca3af', 
-              fontWeight: '600',
-              lineHeight: 32,
-            }}>
-              {isCollapsed ? '↓' : '↑'}
-            </Text>
+            <Ionicons name="arrow-back" size={24} color="#fff" />
           </TouchableOpacity>
         ),
+        headerRight: () => null, // FIX: Remove collapse button to prevent accidental hiding
         tabBarLabelStyle: {
           fontSize: 12,
           fontWeight: '600',

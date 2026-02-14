@@ -9,30 +9,31 @@ export default function OnboardingScreen() {
 
   const handleProceed = async () => {
     console.log('=== PROCEED BUTTON PRESSED ===');
-    
+
     if (isLoading) return;
     setIsLoading(true);
-    
+
     try {
       // Set flag FIRST
       console.log('Saving onboarding state...');
       await AsyncStorage.setItem('hasOnboarded', 'true');
       console.log('Onboarding state saved');
-      
+
       // Small delay to ensure AsyncStorage completes
       await new Promise(resolve => setTimeout(resolve, 100));
       console.log('Delay complete');
-      
+
       // Then navigate (use replace, not navigate, for onboarding)
       console.log('Navigating to main app...');
-      router.replace('/(tabs)');
+      // FIX: Go to HOME screen (Worker/Client selection), not straight to tabs
+      router.replace('/home');
       console.log('Navigation called');
-      
+
     } catch (error) {
       console.error('Onboarding navigation error:', error);
       // Still navigate even if storage fails
       console.log('Error occurred, navigating anyway...');
-      router.replace('/(tabs)');
+      router.replace('/home');
     }
   };
 
@@ -47,7 +48,7 @@ export default function OnboardingScreen() {
 
       {/* Heading */}
       <Text style={styles.heading}>Welcome to{'\n'}BeforeAfter</Text>
-      
+
       {/* Subheading */}
       <Text style={styles.subheading}>
         Professional work verification with{'\n'}cryptographic proof
@@ -55,26 +56,26 @@ export default function OnboardingScreen() {
 
       {/* Features List */}
       <View style={styles.featuresContainer}>
-        <FeatureItem 
-          icon="✓" 
-          title="Verified Proof" 
-          desc="GPS-tagged, time-locked evidence" 
+        <FeatureItem
+          icon="✓"
+          title="Verified Proof"
+          desc="GPS-tagged, time-locked evidence"
         />
-        <FeatureItem 
-          icon="🔐" 
-          title="Secure Hashing" 
-          desc="Cryptographic integrity verification" 
+        <FeatureItem
+          icon="🔐"
+          title="Secure Hashing"
+          desc="Cryptographic integrity verification"
         />
-        <FeatureItem 
-          icon="📋" 
-          title="Legal Export" 
-          desc="Court-admissible documentation" 
+        <FeatureItem
+          icon="📋"
+          title="Legal Export"
+          desc="Court-admissible documentation"
         />
       </View>
 
       {/* Primary CTA */}
-      <TouchableOpacity 
-        style={styles.primaryButton} 
+      <TouchableOpacity
+        style={styles.primaryButton}
         onPress={handleProceed}
         activeOpacity={0.8}
         disabled={isLoading}
@@ -115,12 +116,12 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
   },
-  
+
   logoContainer: {
     marginTop: Spacing.xl,
     alignItems: 'center',
   },
-  
+
   logoBadge: {
     width: 120,
     height: 120,
@@ -131,11 +132,11 @@ const styles = StyleSheet.create({
     borderWidth: 3,
     borderColor: Colors.primary,
   },
-  
+
   logoText: {
     fontSize: 60,
   },
-  
+
   heading: {
     ...Typography.h1,
     color: Colors.textPrimary,
@@ -144,7 +145,7 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.md,
     lineHeight: 40,
   },
-  
+
   subheading: {
     ...Typography.body,
     color: Colors.textSecondary,
@@ -152,41 +153,41 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.xl,
     lineHeight: 22,
   },
-  
+
   featuresContainer: {
     width: '100%',
     gap: Spacing.lg,
     marginVertical: Spacing.xl,
   },
-  
+
   featureItem: {
     flexDirection: 'row',
     alignItems: 'flex-start',
     gap: Spacing.md,
     paddingHorizontal: Spacing.md,
   },
-  
+
   featureIcon: {
     fontSize: 24,
     marginTop: 2,
   },
-  
+
   featureContent: {
     flex: 1,
   },
-  
+
   featureTitle: {
     ...Typography.bodyMedium,
     color: Colors.textPrimary,
     marginBottom: 2,
     fontWeight: '600',
   },
-  
+
   featureDesc: {
     ...Typography.bodySmall,
     color: Colors.textTertiary,
   },
-  
+
   primaryButton: {
     width: '100%',
     paddingVertical: Spacing.lg,
@@ -203,14 +204,14 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
     elevation: 8,
   },
-  
+
   primaryButtonText: {
     ...Typography.h3,
     color: Colors.background,
     fontWeight: '700',
     letterSpacing: 1,
   },
-  
+
   footerText: {
     ...Typography.bodySmall,
     color: Colors.textTertiary,
