@@ -1,50 +1,232 @@
-# Welcome to your Expo app 👋
+# Cryptographic Proof-of-Work Verification System
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+A mobile application that provides cryptographically verifiable, tamper-proof documentation of service work through before/after photo capture with Ed25519 digital signatures, external timestamp anchoring, and GPS verification.
 
-## Get started
+## Overview
 
-1. Install dependencies
+This system enables workers to generate mathematically verifiable proof of completed work, and allows clients to independently verify that proof without trusting the application backend. The entire verification process is client-side, ensuring zero-trust security.
 
-   ```bash
-   npm install
-   ```
+## Core Problem Solved
 
-2. Start the app
+Service workers and clients frequently face disputes over:
+- Whether work was actually completed
+- Quality of work performed
+- Time spent on-site
+- Original condition vs. final condition
 
-   ```bash
-   npx expo start
-   ```
+This application eliminates these disputes through cryptographic proof that cannot be forged or tampered with.
 
-In the output, you'll find options to open the app in a
+## Key Features
 
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
+### Cryptographic Security
+- **Ed25519 Digital Signatures**: All proof data is signed with the worker's private key
+- **SHA-256 Hashing**: Photos and metadata are cryptographically hashed
+- **Fireflower Fingerprints**: Visual cryptographic fingerprints for quick verification
+- **Integrity Verification**: Real-time tamper detection with clear VERIFIED/TAMPERED status
 
-You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
+### Timestamp Verification
+- **External TSA Integration**: RFC 3161 compliant timestamp anchoring via freetsa
+- **Independent Third-Party Proof**: Timestamps cannot be manipulated by any party
+- **Work Window Tracking**: Precise start/end times with session duration
 
-## Get a fresh project
+### Location Verification
+- **GPS Coordinate Capture**: Both before/after photos include location data
+- **Accuracy Metrics**: Plus/minus meter accuracy reporting
+- **Distance Calculation**: Automatic distance measurement between photo locations
+- **On-Site Verification**: Proves worker was physically present during work
 
-When you're ready, run:
+### Proof Generation Workflow
 
-```bash
-npm run reset-project
-```
+**Worker Side:**
+1. Select "I am a worker"
+2. Configure time session (1-10 minutes)
+3. Capture "before" photo
+4. Wait for session timer completion
+5. Capture "after" photo
+6. System generates proof (5-7 seconds processing)
+7. Receive unique 10-digit verification code
+8. Share code with client
 
-This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
+**During Processing:**
+- Photo hashing (SHA-256)
+- GPS coordinate extraction
+- Device metadata collection
+- Ed25519 signature generation
+- External timestamp anchoring (TSA)
+- Proof hash chain creation
 
-## Learn more
+**Client Side:**
+1. Select "I am a client"
+2. Enter 10-digit verification code
+3. Local cryptographic verification executes
+4. View complete proof details (if valid and not expired)
+5. All data runs in ephemeral memory sandbox (zero retention after session)
 
-To learn more about developing your project with Expo, look at the following resources:
+### Proof Details Available
 
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
+- Before/after images (cryptographically hashed)
+- Fireflower cryptographic visual fingerprint
+- Unique verification code
+- GPS coordinates with accuracy
+- Distance between photo locations
+- Complete time analysis (start, end, work window)
+- External timestamp anchor data
+- Technical hash information (before, after, proof hashes)
+- Device metadata (name, platform, algorithm)
+- AI-generated narrative of work performed
+- Integrity verification status
 
-## Join the community
+### Export Capabilities
 
-Join our community of developers creating universal apps.
+- JSON report
+- PDF report  
+- Legal JSON evidence format
+- Legal PDF evidence format
+- Audit trail export
+- Verification code sharing
 
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+### Audit Trail System
+
+- Comprehensive logging of all actions
+- Cancelled session tracking
+- Tamper attempt recording
+- Complete session history
+- Exportable for legal/compliance purposes
+
+## Technical Stack
+
+### Backend
+- **Language**: Go (Golang)
+- **Function**: Proof storage, code generation, API endpoints
+
+### Cryptography
+- **Digital Signatures**: Ed25519
+- **Hashing**: SHA-256
+- **Timestamp Authority**: freetsa (RFC 3161 compliant)
+
+### Client-Side Operations
+- Local signature verification
+- Zero-trust model (no backend trust required)
+- Ephemeral memory sandbox for client proof viewing
+
+### Storage
+- Asynchronous image storage
+- Cryptographic hashing before storage
+- Secure proof data persistence
+
+### AI Integration
+- Image narrative generation
+- Contextual work description
+
+## Security Model
+
+### Zero-Trust Architecture
+Clients verify all cryptographic signatures locally. No trust in the application backend, the worker, or any intermediary is required. The mathematics guarantee authenticity.
+
+### Tamper Detection
+Any modification to proof data invalidates the Ed25519 signature, immediately marking the proof as TAMPERED. This includes:
+- Photo alterations
+- Timestamp modifications
+- GPS coordinate changes
+- Metadata tampering
+
+### Code Expiration
+Verification codes expire after 24 hours for security purposes.
+
+### Client Data Isolation
+Client-side proof viewing operates in an ephemeral memory sandbox. All data is destroyed when the client exits the verification view.
+
+## Use Cases
+
+### Primary Markets
+- Cleaning services (residential, commercial, carpet)
+- Maintenance workers (HVAC, plumbing, electrical)
+- Landscaping and gardening
+- Delivery and logistics
+- Construction and contracting
+- Property management
+- Auto detailing and mechanics
+- Painting services
+- Pest control
+- Inspection services
+
+### Worker Benefits
+- Protection against false claims
+- Dispute resolution evidence
+- Professional credibility enhancement
+- Payment protection
+- Legal defense capability
+- Verifiable work portfolio
+
+### Client Benefits
+- Independent verification capability
+- Zero backend trust requirement
+- Quality assurance documentation
+- Dispute evidence
+- Worker accountability
+- Legal protection
+
+## What This System Is NOT
+
+- Not a payment processing platform
+- Not a worker marketplace or job matching service
+- Not a project management tool
+- Not a communication platform
+- Not designed for real-time collaboration
+- Not a permanent record retrieval system (24-hour code expiration)
+
+## Installation
+
+[Installation instructions to be added]
+
+## Configuration
+
+[Configuration details to be added]
+
+## API Documentation
+
+[API documentation to be added]
+
+## Contributing
+
+[Contributing guidelines to be added]
+
+## License
+
+[License information to be added]
+
+## Contact
+
+[Contact information to be added]
+
+---
+
+## Technical Notes
+
+### Why Ed25519?
+- Fast signature generation and verification
+- Small signature size (64 bytes)
+- High security (equivalent to 3072-bit RSA)
+- Deterministic signatures (same input always produces same output)
+
+### Why External TSA?
+- Independent third-party verification
+- Legal defensibility in court
+- Cannot be manipulated by application or users
+- RFC 3161 compliance for industry standard compatibility
+
+### Why Client-Side Verification?
+- Eliminates need to trust the backend
+- User maintains complete control
+- Proof remains valid even if backend is compromised
+- True decentralization of trust
+
+### Why 24-Hour Expiration?
+- Security best practice for verification codes
+- Encourages timely verification
+- Reduces attack surface for code interception
+- Balances usability with security
+
+## Future Roadmap
+
+[Planned features and improvements to be added]
