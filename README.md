@@ -177,28 +177,11 @@ Client-side proof viewing operates in an ephemeral memory sandbox. All data is d
 
 ## Installation
 
-[Installation instructions to be added]
-
-## Configuration
-
-[Configuration details to be added]
-
-## API Documentation
-
-[API documentation to be added]
-
-## Contributing
-
-[Contributing guidelines to be added]
-
-## License
-
-[License information to be added]
+npm install
 
 ## Contact
 
-[Contact information to be added]
-
+mozar.t@yahoo.com
 ---
 
 ## Technical Notes
