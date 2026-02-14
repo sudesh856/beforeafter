@@ -1,18 +1,12 @@
-import { AuditEvent, EditingViolation, LocationData, ProofRecord, SessionMetadata, TamperFlag, TimeAnomaly, TimeWindowData } from '@/lib/proof';
-// Note: TamperFlag type in @/lib/proof needs to include 'time_window_expired' in its reason union type
-// Update the TamperFlag definition to: reason: 'before_deleted' | 'session_abandoned' | 'timeout' | 'location_mismatch' | 'time_window_expired'
 import { getAnchorService } from '@/lib/anchoring/anchorService';
+import { AuditEvent, EditingViolation, LocationData, ProofRecord, SessionMetadata, TamperFlag, TimeAnomaly, TimeWindowData } from '@/lib/proof';
 
-import { DIGICERT_TSA, FREETSA } from '@/lib/anchoring/tsaClient';
-import { initFirebaseOnStartup, uploadProofMetadata } from '@/lib/firebase';
+import { DIGICERT_TSA } from '@/lib/anchoring/tsaClient';
 import { validateRadius } from '@/lib/radiusEnforcement';
-import { getDeviceId } from '@/lib/witnessDatabase';
-import { manualSync, startPeriodicSync } from '@/lib/witnessSync';
 
 
-
-
-
+import { generateWorkerKeypair, getDeviceWorkerId, ProofObject } from '@/app/utils/crypto';
+import { generatePin, uploadProof } from '@/app/utils/proofUpload';
 import {
   detectClockAnomaly,
   getElapsedMonotonicMs,
@@ -27,6 +21,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { Ionicons } from '@expo/vector-icons';
 import { CameraView, useCameraPermissions } from 'expo-camera';
+import * as Clipboard from 'expo-clipboard';
 import * as Crypto from 'expo-crypto';
 import * as Device from 'expo-device';
 import * as FileSystem from 'expo-file-system/legacy';
@@ -40,15 +35,19 @@ import {
   AppState,
   AppStateStatus,
   InteractionManager,
+  Modal,
   Platform,
   SafeAreaView,
   ScrollView,
+  Share,
   StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
   View
 } from 'react-native';
+
+
 
 
 type CaptureMode = 'before' | 'after';
@@ -59,7 +58,6 @@ type Metadata = {
   platform: string;
 };
 
-// PAIRED SESSION LOCKING - Core anti-fraud mechanism
 type SessionData = {
   id: string;
   startTime: string;
@@ -68,16 +66,14 @@ type SessionData = {
   beforeLocation: LocationData;
   isActive: boolean;
   createdAt: number;
-  // USER-DECLARED TIME WINDOW ENFORCEMENT - Appended fields
   timeWindow?: TimeWindowData;
   timeAnomalies?: TimeAnomaly[];
 };
 
 export default function HomeScreen() {
   const cameraRef = useRef<CameraView>(null);
-  const [jobSiteLocation, setJobSiteLocation] = useState<LocationData | null>(null); // ✅ PUT IT HERE
+  const [jobSiteLocation, setJobSiteLocation] = useState<LocationData | null>(null);
 
-  // Welcome screen state
   const [hasProceeded, setHasProceeded] = useState(false);
 
   const [beforeUri, setBeforeUri] = useState<string | null>(null);
@@ -88,18 +84,16 @@ export default function HomeScreen() {
 
   const [mode, setMode] = useState<CaptureMode>('before');
   const [showCamera, setShowCamera] = useState(false);
-  // Add with your other state declarations
-const [editingViolations, setEditingViolations] = useState<EditingViolation[]>([]);
+
+  const [editingViolations, setEditingViolations] = useState<EditingViolation[]>([]);
 
   const [metadata, setMetadata] = useState<Metadata | null>(null);
   const [beforeLocation, setBeforeLocation] = useState<LocationData | null>(null);
   const [validationError, setValidationError] = useState<string | null>(null);
   const [tamperWarnings, setTamperWarnings] = useState<TamperFlag[]>([]);
 
-  // PAIRED SESSION LOCKING - State for active session
   const [activeSession, setActiveSession] = useState<SessionData | null>(null);
 
-  // AUDIT TRAIL - Added states
   const [jobId, setJobId] = useState<string>('');
   const [clientName, setClientName] = useState<string>('');
   const [sessionMetadata, setSessionMetadata] = useState<SessionMetadata>({});
@@ -107,18 +101,23 @@ const [editingViolations, setEditingViolations] = useState<EditingViolation[]>([
 
   const [permission, requestPermission] = useCameraPermissions();
 
-  // UI/UX STATE - Track whether data exists for export and cooldown
   const [hasExportData, setHasExportData] = useState(false);
 
-  // PERFORMANCE FIX - Debounce and loading states
   const [isProcessing, setIsProcessing] = useState(false);
   const [processingMessage, setProcessingMessage] = useState<string | null>(null);
   const isProcessingRef = useRef(false);
 
+  // PIN display state
+  const [showPinModal, setShowPinModal] = useState(false);
+  const [currentPin, setCurrentPin] = useState('');
+  const [currentProofId, setCurrentProofId] = useState('');
+  const [pinError, setPinError] = useState('');
+  const [generatingCode, setGeneratingCode] = useState(false);
+
   // USER-DECLARED TIME WINDOW ENFORCEMENT - State for time window UI and tracking
   const [showTimeWindowForm, setShowTimeWindowForm] = useState(false);
   const [selectedMinTimeMin, setSelectedMinTimeMin] = useState<number | null>(null);
-const [selectedMaxTimeMin, setSelectedMaxTimeMin] = useState<number | null>(null); // Default 10 minutes
+  const [selectedMaxTimeMin, setSelectedMaxTimeMin] = useState<number | null>(null); // Default 10 minutes
   const [timeWindow, setTimeWindow] = useState<TimeWindowData | null>(null);
   const [elapsedTimeMs, setElapsedTimeMs] = useState(0);
   const [timeWindowStatus, setTimeWindowStatus] = useState<'VALID' | 'INVALID' | 'EXPIRED' | null>(null);
@@ -185,9 +184,9 @@ const [selectedMaxTimeMin, setSelectedMaxTimeMin] = useState<number | null>(null
     const a =
       Math.sin(dLat / 2) * Math.sin(dLat / 2) +
       Math.cos((lat1 * Math.PI) / 180) *
-        Math.cos((lat2 * Math.PI) / 180) *
-        Math.sin(dLon / 2) *
-        Math.sin(dLon / 2);
+      Math.cos((lat2 * Math.PI) / 180) *
+      Math.sin(dLon / 2) *
+      Math.sin(dLon / 2);
     const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
     return R * c;
   };
@@ -212,51 +211,51 @@ const [selectedMaxTimeMin, setSelectedMaxTimeMin] = useState<number | null>(null
 
   // Add this function after hashImage function (around line 120)
 
-  
-const checkPhotoIntegrity = async (
-  uri: string, 
-  photoType: 'before' | 'after',
-  sessionId: string
-): Promise<{isValid: boolean; violations: string[]}> => {
-  const violations: string[] = [];
-  
-  try {
-    // In a real app, you would:
-    // 1. Check EXIF metadata for edits
-    // 2. Compare file modified time vs capture time
-    // 3. Look for editing app signatures
-    // 4. Check image dimensions match camera specs
-    
-    // For demo, simulate checks:
 
-     // ===== TO ALLOW EDITING - UNCOMMENT THIS LINE =====
-  // return { isValid: true, violations: [] };
-  
-  // ===== TO PREVENT EDITING - KEEP THIS CODE =====
-    console.log(`🔍 Checking ${photoType} photo integrity:`, uri);
-    
-    // Simulate finding edits (for demo - 10% chance) EDITINGGGGGGG
-    // if (Math.random() < 0.1) {
-    //   violations.push('EXIF shows post-processing');
-    //   await logEditingViolation(sessionId, photoType, 'adjustment', 'EXIF metadata indicates editing');
-    // }
-    
-    // // Simulate crop detection
-    // if (Math.random() < 0.05) {
-    //   violations.push('Image appears cropped');
-    //   await logEditingViolation(sessionId, photoType, 'crop', 'Aspect ratio suggests cropping');
-    // }
-    
-    return {
-      isValid: violations.length === 0,
-      violations
-    };
-    
-  } catch (error) {
-    console.error('Integrity check error:', error);
-    return { isValid: true, violations: [] }; // Fail-safe
-  }
-};
+  const checkPhotoIntegrity = async (
+    uri: string,
+    photoType: 'before' | 'after',
+    sessionId: string
+  ): Promise<{ isValid: boolean; violations: string[] }> => {
+    const violations: string[] = [];
+
+    try {
+      // In a real app, you would:
+      // 1. Check EXIF metadata for edits
+      // 2. Compare file modified time vs capture time
+      // 3. Look for editing app signatures
+      // 4. Check image dimensions match camera specs
+
+      // For demo, simulate checks:
+
+      // ===== TO ALLOW EDITING - UNCOMMENT THIS LINE =====
+      // return { isValid: true, violations: [] };
+
+      // ===== TO PREVENT EDITING - KEEP THIS CODE =====
+      console.log(`🔍 Checking ${photoType} photo integrity:`, uri);
+
+      // Simulate finding edits (for demo - 10% chance) EDITINGGGGGGG
+      // if (Math.random() < 0.1) {
+      //   violations.push('EXIF shows post-processing');
+      //   await logEditingViolation(sessionId, photoType, 'adjustment', 'EXIF metadata indicates editing');
+      // }
+
+      // // Simulate crop detection
+      // if (Math.random() < 0.05) {
+      //   violations.push('Image appears cropped');
+      //   await logEditingViolation(sessionId, photoType, 'crop', 'Aspect ratio suggests cropping');
+      // }
+
+      return {
+        isValid: violations.length === 0,
+        violations
+      };
+
+    } catch (error) {
+      console.error('Integrity check error:', error);
+      return { isValid: true, violations: [] }; // Fail-safe
+    }
+  };
   // Generate verification code deterministically from proof data
   // Format: BA-YYYY-XXXXXX (e.g., BA-2026-7F3A9D)
   // The code is derived from cryptographic hashes, ensuring it changes if any proof data is modified
@@ -391,7 +390,7 @@ const checkPhotoIntegrity = async (
       const proofs = await AsyncStorage.getItem('proofs');
       const auditTrail = await AsyncStorage.getItem('auditTrail');
       const tamperWarnings = await AsyncStorage.getItem('tamperWarnings');
-      
+
       const hasData = !!(proofs || auditTrail || tamperWarnings);
       setHasExportData(hasData);
       return hasData;
@@ -403,15 +402,15 @@ const checkPhotoIntegrity = async (
   };
 
   // UI/UX - Calculate remaining cooldown time and disable "Take After" button
- 
+
 
   // PAIRED SESSION LOCKING - Check if active session exists and is valid
-   const validateActiveSession = async (): Promise<boolean> => {
+  const validateActiveSession = async (): Promise<boolean> => {
     // Check if there's an active session in state
     if (activeSession && activeSession.isActive) {
       const sessionAge = Date.now() - activeSession.createdAt;
       const SESSION_TIMEOUT = 30 * 60 * 1000; // 30 minutes timeout
-      
+
       if (sessionAge > SESSION_TIMEOUT) {
         // Session expired
         setActiveSession(null);
@@ -419,7 +418,7 @@ const checkPhotoIntegrity = async (
       }
       return true;
     }
-    
+
     // Also check AsyncStorage for any persisted active session
     try {
       const sessionData = await AsyncStorage.getItem('activeSession');
@@ -427,14 +426,14 @@ const checkPhotoIntegrity = async (
         const session: SessionData = JSON.parse(sessionData);
         const sessionAge = Date.now() - session.createdAt;
         const SESSION_TIMEOUT = 30 * 60 * 1000; // 30 minutes timeout
-        
+
         if (sessionAge > SESSION_TIMEOUT) {
           // Session expired
           await AsyncStorage.removeItem('activeSession');
           setActiveSession(null);
           return false;
         }
-        
+
         // CRITICAL FIX: Only restore session if it has a Before photo
         // (prevents ghost sessions from incomplete attempts or crashed states)
         if (!session.beforeUri) {
@@ -442,7 +441,7 @@ const checkPhotoIntegrity = async (
           await AsyncStorage.removeItem('activeSession');
           return false;
         }
-        
+
         // Restore active session
         setActiveSession(session);
         return true;
@@ -450,7 +449,7 @@ const checkPhotoIntegrity = async (
     } catch (error) {
       console.error('Error checking active session:', error);
     }
-    
+
     return false;
   };
 
@@ -467,12 +466,12 @@ const checkPhotoIntegrity = async (
 
     // USER-DECLARED TIME WINDOW ENFORCEMENT - Initialize monotonic time tracking
     const { monoMs, sysMs } = initializeTimeTracking();
-    
+
     // Validate time window values are set
     if (selectedMinTimeMin === null || selectedMaxTimeMin === null) {
       throw new Error('Time window not properly configured');
     }
-    
+
     const minTimeMs = selectedMinTimeMin * 60 * 1000; // Convert minutes to ms
     const maxTimeMs = selectedMaxTimeMin * 60 * 1000;
 
@@ -503,17 +502,17 @@ const checkPhotoIntegrity = async (
     setElapsedTimeMs(0);
     setTimeWindowStatus('INVALID');
     setTimeAnomalies([]);
-    
+
     // Persist session for app restarts
     await AsyncStorage.setItem('activeSession', JSON.stringify(session));
-    
+
     // Log time window declaration
     await logAuditEvent('time_window_declared', sessionId, undefined, beforeLocation, {
       minTimeMs,
       maxTimeMs,
       timeSource: getTimeSource(),
     });
-    
+
     return session;
   };
 
@@ -540,6 +539,106 @@ const checkPhotoIntegrity = async (
     await checkExportDataExists(); // Refresh export button
   };
 
+  /**
+   * Convert ProofRecord to ProofObject format for signing/upload
+   */
+  const convertProofRecordToProofObject = async (proof: ProofRecord): Promise<ProofObject> => {
+    const workerId = await getDeviceWorkerId();
+
+    return {
+      proofId: proof.id,
+      status: 'completed',
+      workerId: workerId,
+      createdAt: proof.createdAt,
+      before: {
+        timestamp: proof.beforeTimestamp || proof.createdAt,
+        imageHash: proof.beforeHash,
+        gps: {
+          lat: proof.beforeLocation?.latitude || 0,
+          lon: proof.beforeLocation?.longitude || 0,
+        },
+      },
+      after: {
+        timestamp: proof.afterTimestamp || proof.createdAt,
+        imageHash: proof.afterHash,
+        gps: {
+          lat: proof.afterLocation?.latitude || 0,
+          lon: proof.afterLocation?.longitude || 0,
+        },
+      },
+    };
+  };
+
+  /**
+   * Upload proof with cryptographic signature, then generate PIN
+   * CRYPTOGRAPHIC SIGNING - Worker signs proof with private key before upload
+   */
+  const uploadAndGeneratePin = async (proof: ProofRecord) => {
+    try {
+      setGeneratingCode(true);
+      console.log('📤 [UPLOAD] Starting proof upload with signature...');
+
+
+
+      // Convert to ProofObject format
+      const proofObject = await convertProofRecordToProofObject(proof);
+
+      // Upload signed proof to backend
+      // uploadProof will:
+      // 1. Register public key if first upload
+      // 2. Sign proof with private key
+      // 3. Send proof + signature to backend
+      await uploadProof(proofObject);
+      console.log('✅ [UPLOAD] Proof uploaded with signature');
+
+      // Now generate PIN from backend (proof must be uploaded first)
+      setCurrentProofId(proof.id);
+      setPinError('');
+      setCurrentPin('');
+
+      console.log('🔐 Generating PIN for proof:', proof.id);
+      const pin = await generatePin(proof.id);
+      setCurrentPin(pin);
+      console.log('✓ PIN generated:', pin);
+
+      setGeneratingCode(false);
+      setShowPinModal(true);
+    } catch (error) {
+      console.error('❌ Upload/PIN error:', error);
+      setGeneratingCode(false);
+      setPinError(
+        error instanceof Error ? error.message : 'Failed to generate PIN'
+      );
+      Alert.alert('Error', 'Could not upload proof or generate PIN. Please check your connection and try again.');
+      // Still show modal so user knows something happened
+      setShowPinModal(true);
+    }
+  };
+
+  /**
+   * Display PIN modal after proof upload
+   * @deprecated Use uploadAndGeneratePin instead (includes upload)
+   */
+  const showPinForProof = async (proofId: string) => {
+    try {
+      setCurrentProofId(proofId);
+      setPinError('');
+      setCurrentPin('');
+      setShowPinModal(true);
+
+      console.log('🔐 Generating PIN for proof:', proofId);
+      const pin = await generatePin(proofId);
+      setCurrentPin(pin);
+      console.log('✓ PIN generated:', pin);
+    } catch (error) {
+      console.error('PIN generation error:', error);
+      setPinError(
+        error instanceof Error ? error.message : 'Failed to generate PIN'
+      );
+      Alert.alert('Error', 'Could not generate PIN for sharing');
+    }
+  };
+
   // PAIRED SESSION LOCKING - Complete and clear session
   const completeSession = async () => {
     await resetUIState();
@@ -548,94 +647,94 @@ const checkPhotoIntegrity = async (
 
 
   const logAuditEvent = async (
-  type: AuditEvent['type'],
-  sessionId?: string,
-  proofId?: string,
-  location?: LocationData,
-  additionalData?: any
-) => {
-  try {
-    const event: AuditEvent = {
-      id: Date.now().toString(),
-      type,
-      timestamp: new Date().toISOString(),
-      sessionId,
-      proofId,
-      location,
-      metadata: {
-        device: Device.modelName || 'Unknown',
-        platform: Platform.OS,
-        jobId: sessionMetadata.jobId,
-        clientName: sessionMetadata.clientName,
-        ...additionalData
-      }
-    };
+    type: AuditEvent['type'],
+    sessionId?: string,
+    proofId?: string,
+    location?: LocationData,
+    additionalData?: any
+  ) => {
+    try {
+      const event: AuditEvent = {
+        id: Date.now().toString(),
+        type,
+        timestamp: new Date().toISOString(),
+        sessionId,
+        proofId,
+        location,
+        metadata: {
+          device: Device.modelName || 'Unknown',
+          platform: Platform.OS,
+          jobId: sessionMetadata.jobId,
+          clientName: sessionMetadata.clientName,
+          ...additionalData
+        }
+      };
 
-    const existing = await AsyncStorage.getItem('auditTrail');
-    const auditTrail = existing ? JSON.parse(existing) : [];
-    auditTrail.push(event);
-    
-    // Keep last 1000 events
-    const limitedTrail = auditTrail.slice(-1000);
-    await AsyncStorage.setItem('auditTrail', JSON.stringify(limitedTrail));
-    
-    console.log(`[AUDIT] ${type}: ${sessionId || 'no-session'}`);
-  } catch (error) {
-    console.error('Audit log error:', error);
-  }
-};
+      const existing = await AsyncStorage.getItem('auditTrail');
+      const auditTrail = existing ? JSON.parse(existing) : [];
+      auditTrail.push(event);
 
-// TAMPER PROTECTION - Log tamper events (ADDED)
-const logTamperEvent = async (
-  reason: TamperFlag['reason'],
-  sessionId: string,
-  proofId?: string,
-  details?: string
-) => {
-  try {
-    const tamperFlag: TamperFlag = {
-      id: Date.now().toString(),
-      timestamp: new Date().toISOString(),
-      reason,
-      sessionId,
-      proofId,
-      details
-    };
+      // Keep last 1000 events
+      const limitedTrail = auditTrail.slice(-1000);
+      await AsyncStorage.setItem('auditTrail', JSON.stringify(limitedTrail));
 
+      console.log(`[AUDIT] ${type}: ${sessionId || 'no-session'}`);
+    } catch (error) {
+      console.error('Audit log error:', error);
+    }
+  };
 
+  // TAMPER PROTECTION - Log tamper events (ADDED)
+  const logTamperEvent = async (
+    reason: TamperFlag['reason'],
+    sessionId: string,
+    proofId?: string,
+    details?: string
+  ) => {
+    try {
+      const tamperFlag: TamperFlag = {
+        id: Date.now().toString(),
+        timestamp: new Date().toISOString(),
+        reason,
+        sessionId,
+        proofId,
+        details
+      };
 
 
-    // Store in tamper warnings
-    const existing = await AsyncStorage.getItem('tamperWarnings');
-    const warnings = existing ? JSON.parse(existing) : [];
-    warnings.push(tamperFlag);
-    await AsyncStorage.setItem('tamperWarnings', JSON.stringify(warnings.slice(-100)));
-    
-    // Also log as audit event
-    await logAuditEvent('tamper_detected', sessionId, proofId, undefined, {
-      tamperReason: reason,
-      details
-    });
-    
-    console.log(`[TAMPER] ${reason}: ${sessionId}`);
-  } catch (error) {
-    console.error('Tamper log error:', error);
-  }
-};
+
+
+      // Store in tamper warnings
+      const existing = await AsyncStorage.getItem('tamperWarnings');
+      const warnings = existing ? JSON.parse(existing) : [];
+      warnings.push(tamperFlag);
+      await AsyncStorage.setItem('tamperWarnings', JSON.stringify(warnings.slice(-100)));
+
+      // Also log as audit event
+      await logAuditEvent('tamper_detected', sessionId, proofId, undefined, {
+        tamperReason: reason,
+        details
+      });
+
+      console.log(`[TAMPER] ${reason}: ${sessionId}`);
+    } catch (error) {
+      console.error('Tamper log error:', error);
+    }
+  };
 
   // PAIRED SESSION LOCKING - Abandon session (user cancels)
-const abandonSession = async () => {
-  // AUDIT TRAIL - Log session cancellation
-  await logAuditEvent('session_cancelled', activeSession?.id);
-  
-  // TAMPER PROTECTION - Log tamper event
-  if (activeSession?.id) {
-    await logTamperEvent('session_abandoned', activeSession.id, undefined, 'User manually cancelled session');
-  }
-  
-  // UI/UX - Reset all UI state
-  await resetUIState();
-};
+  const abandonSession = async () => {
+    // AUDIT TRAIL - Log session cancellation
+    await logAuditEvent('session_cancelled', activeSession?.id);
+
+    // TAMPER PROTECTION - Log tamper event
+    if (activeSession?.id) {
+      await logTamperEvent('session_abandoned', activeSession.id, undefined, 'User manually cancelled session');
+    }
+
+    // UI/UX - Reset all UI state
+    await resetUIState();
+  };
 
   // Get detected anomalies from current session
   const getDetectedAnomalies = (): TimeAnomaly[] => {
@@ -643,51 +742,51 @@ const abandonSession = async () => {
   };
 
   // AUDIT TRAIL - Log event function (ADDED)
-const logEditingViolation = async (
-  sessionId: string,
-  photoType: 'before' | 'after',
-  violationType: EditingViolation['violationType'],
-  details: string
-) => {
-  try {
-    const violation: EditingViolation = {
-      id: Date.now().toString(),
-      timestamp: new Date().toISOString(),
-      sessionId,
-      photoType,
-      violationType,
-      details
-    };
+  const logEditingViolation = async (
+    sessionId: string,
+    photoType: 'before' | 'after',
+    violationType: EditingViolation['violationType'],
+    details: string
+  ) => {
+    try {
+      const violation: EditingViolation = {
+        id: Date.now().toString(),
+        timestamp: new Date().toISOString(),
+        sessionId,
+        photoType,
+        violationType,
+        details
+      };
 
-    // Store violations
-    const existing = await AsyncStorage.getItem('editingViolations');
-    const violations = existing ? JSON.parse(existing) : [];
-    violations.push(violation);
-    await AsyncStorage.setItem('editingViolations', JSON.stringify(violations.slice(-100)));
-    
-    // Also log as audit event
-    await logAuditEvent('editing_violation', sessionId, undefined, undefined, {
-      photoType,
-      violationType,
-      details
-    });
-    
-    console.log(`[EDITING VIOLATION] ${photoType} ${violationType}: ${details}`);
-    
-    // Update state for UI
-    setEditingViolations(prev => [...prev, violation]);
-    
-  } catch (error) {
-    console.error('Violation log error:', error);
-  }
-};
+      // Store violations
+      const existing = await AsyncStorage.getItem('editingViolations');
+      const violations = existing ? JSON.parse(existing) : [];
+      violations.push(violation);
+      await AsyncStorage.setItem('editingViolations', JSON.stringify(violations.slice(-100)));
 
+      // Also log as audit event
+      await logAuditEvent('editing_violation', sessionId, undefined, undefined, {
+        photoType,
+        violationType,
+        details
+      });
 
+      console.log(`[EDITING VIOLATION] ${photoType} ${violationType}: ${details}`);
+
+      // Update state for UI
+      setEditingViolations(prev => [...prev, violation]);
+
+    } catch (error) {
+      console.error('Violation log error:', error);
+    }
+  };
 
 
 
 
-    
+
+
+
 
 
 
@@ -695,98 +794,98 @@ const logEditingViolation = async (
 
   // AUDIT TRAIL - Export function (ADDED)
   const exportAuditTrail = async () => {
-  try {
-    const auditData = await AsyncStorage.getItem('auditTrail');
-    const proofData = await AsyncStorage.getItem('proofs');
-    const sessionData = await AsyncStorage.getItem('activeSession');
-    const tamperData = await AsyncStorage.getItem('tamperWarnings');
-    const violationData = await AsyncStorage.getItem('editingViolations');
-    
-    // USER-DECLARED TIME WINDOW ENFORCEMENT - Parse proofs and extract time window info
-    const parsedProofs = proofData ? JSON.parse(proofData) : [];
-    const timeWindowSummary = parsedProofs.map((proof: ProofRecord) => ({
-      proofId: proof.id,
-      declaredMinTimeMin: proof.timeWindow ? (proof.timeWindow.minTimeMs / 60000).toFixed(0) : 'N/A',
-      declaredMaxTimeMin: proof.timeWindow ? (proof.timeWindow.maxTimeMs / 60000).toFixed(0) : 'N/A',
-      actualElapsedMin: proof.timeWindow ? (proof.timeWindow.actualElapsedMs / 60000).toFixed(1) : 'N/A',
-      timeVerificationStatus: proof.timeWindow?.timeVerificationStatus || 'UNKNOWN',
-      timeSource: proof.timeWindow?.timeSource || 'unknown',
-      timeAnomaliesCount: proof.timeAnomalies?.length || 0,
-    }));
+    try {
+      const auditData = await AsyncStorage.getItem('auditTrail');
+      const proofData = await AsyncStorage.getItem('proofs');
+      const sessionData = await AsyncStorage.getItem('activeSession');
+      const tamperData = await AsyncStorage.getItem('tamperWarnings');
+      const violationData = await AsyncStorage.getItem('editingViolations');
 
-    // EXTERNAL TIMESTAMP ANCHORING - Generate anchor verification summary
-    const anchorSummary = parsedProofs.map((proof: ProofRecord) => ({
-      proofId: proof.id,
-      verificationCode: proof.verificationCode,
-      anchorStatus: proof.externalAnchor?.status || 'unanchored',
-      anchorMethod: proof.externalAnchor?.method || 'none',
-      tsaName: proof.externalAnchor?.tsaName || null,
-      anchoredAt: proof.externalAnchor?.anchoredAt || null,
-      verification: proof.externalAnchor?.verification || 'unverified',
-      independentlyVerifiable: proof.externalAnchor?.status === 'anchored' && !!proof.externalAnchor?.tokenData,
-    }));
+      // USER-DECLARED TIME WINDOW ENFORCEMENT - Parse proofs and extract time window info
+      const parsedProofs = proofData ? JSON.parse(proofData) : [];
+      const timeWindowSummary = parsedProofs.map((proof: ProofRecord) => ({
+        proofId: proof.id,
+        declaredMinTimeMin: proof.timeWindow ? (proof.timeWindow.minTimeMs / 60000).toFixed(0) : 'N/A',
+        declaredMaxTimeMin: proof.timeWindow ? (proof.timeWindow.maxTimeMs / 60000).toFixed(0) : 'N/A',
+        actualElapsedMin: proof.timeWindow ? (proof.timeWindow.actualElapsedMs / 60000).toFixed(1) : 'N/A',
+        timeVerificationStatus: proof.timeWindow?.timeVerificationStatus || 'UNKNOWN',
+        timeSource: proof.timeWindow?.timeSource || 'unknown',
+        timeAnomaliesCount: proof.timeAnomalies?.length || 0,
+      }));
 
-    const totalAnchored = anchorSummary.filter((a: any) => a.anchorStatus === 'anchored').length;
-    const totalPending = anchorSummary.filter((a: any) => a.anchorStatus === 'pending').length;
+      // EXTERNAL TIMESTAMP ANCHORING - Generate anchor verification summary
+      const anchorSummary = parsedProofs.map((proof: ProofRecord) => ({
+        proofId: proof.id,
+        verificationCode: proof.verificationCode,
+        anchorStatus: proof.externalAnchor?.status || 'unanchored',
+        anchorMethod: proof.externalAnchor?.method || 'none',
+        tsaName: proof.externalAnchor?.tsaName || null,
+        anchoredAt: proof.externalAnchor?.anchoredAt || null,
+        verification: proof.externalAnchor?.verification || 'unverified',
+        independentlyVerifiable: proof.externalAnchor?.status === 'anchored' && !!proof.externalAnchor?.tokenData,
+      }));
 
-    const exportData = {
-      exportedAt: new Date().toISOString(),
-      device: Device.modelName || 'Unknown',
-      platform: Platform.OS,
-      // EXTERNAL TIMESTAMP ANCHORING - Add anchor verification summary
-      externalTimestampAnchoring: {
-        featureName: 'External Timestamp Anchoring (RFC 3161 TSA)',
-        summary: anchorSummary,
-        totalProofs: parsedProofs.length,
-        totalAnchored,
-        totalPending,
-        totalUnanchored: parsedProofs.length - totalAnchored - totalPending,
-        anchoringNote: 'All anchored proofs contain signed TSA tokens that are independently verifiable by third parties.',
-      },
-      // USER-DECLARED TIME WINDOW ENFORCEMENT - Add time window verification summary
-      timeWindowEnforcement: {
-        featureName: 'User-Declared Time Window Enforcement',
-        summary: timeWindowSummary,
-        anomaliesDetected: timeAnomalies.length > 0,
-      },
-      auditTrail: auditData ? JSON.parse(auditData) : [],
-      proofs: parsedProofs.map((proof: ProofRecord) => ({
-        ...proof,
-        algorithmVersion: proof.algorithmVersion || '1.0.0', // ALGORITHM VERSION LOCKING - Include version in export
-      })),
-      activeSession: sessionData ? JSON.parse(sessionData) : null,
-      sessionMetadata,
-      tamperWarnings: tamperData ? JSON.parse(tamperData) : [],
-      editingViolations: violationData ? JSON.parse(violationData) : [],
-      integrityStatus: (tamperData && JSON.parse(tamperData).length > 0) || 
-                      (violationData && JSON.parse(violationData).length > 0) 
-                      ? 'COMPROMISED' : 'INTACT'
-    };
-    
-    // Log the export event
-    await logAuditEvent('export_requested', activeSession?.id);
-    
-    // Create JSON file in cache directory (always writable)
-    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-    const fileName = `audit-trail-${timestamp}.json`;
-    const fileUri = `${FileSystem.cacheDirectory}${fileName}`;
-    
-    // Write the audit trail to file
-    const jsonContent = JSON.stringify(exportData, null, 2);
-    await FileSystem.writeAsStringAsync(fileUri, jsonContent);
-    
-    // Trigger native share sheet
-    await Sharing.shareAsync(fileUri, {
-      mimeType: 'application/json',
-      dialogTitle: 'Export Audit Trail',
-      UTI: 'public.json',
-    });
-    
-  } catch (error) {
-    console.error('Export error:', error);
-    alert('Export failed: ' + (error instanceof Error ? error.message : 'Unknown error'));
-  }
-};
+      const totalAnchored = anchorSummary.filter((a: any) => a.anchorStatus === 'anchored').length;
+      const totalPending = anchorSummary.filter((a: any) => a.anchorStatus === 'pending').length;
+
+      const exportData = {
+        exportedAt: new Date().toISOString(),
+        device: Device.modelName || 'Unknown',
+        platform: Platform.OS,
+        // EXTERNAL TIMESTAMP ANCHORING - Add anchor verification summary
+        externalTimestampAnchoring: {
+          featureName: 'External Timestamp Anchoring (RFC 3161 TSA)',
+          summary: anchorSummary,
+          totalProofs: parsedProofs.length,
+          totalAnchored,
+          totalPending,
+          totalUnanchored: parsedProofs.length - totalAnchored - totalPending,
+          anchoringNote: 'All anchored proofs contain signed TSA tokens that are independently verifiable by third parties.',
+        },
+        // USER-DECLARED TIME WINDOW ENFORCEMENT - Add time window verification summary
+        timeWindowEnforcement: {
+          featureName: 'User-Declared Time Window Enforcement',
+          summary: timeWindowSummary,
+          anomaliesDetected: timeAnomalies.length > 0,
+        },
+        auditTrail: auditData ? JSON.parse(auditData) : [],
+        proofs: parsedProofs.map((proof: ProofRecord) => ({
+          ...proof,
+          algorithmVersion: proof.algorithmVersion || '1.0.0', // ALGORITHM VERSION LOCKING - Include version in export
+        })),
+        activeSession: sessionData ? JSON.parse(sessionData) : null,
+        sessionMetadata,
+        tamperWarnings: tamperData ? JSON.parse(tamperData) : [],
+        editingViolations: violationData ? JSON.parse(violationData) : [],
+        integrityStatus: (tamperData && JSON.parse(tamperData).length > 0) ||
+          (violationData && JSON.parse(violationData).length > 0)
+          ? 'COMPROMISED' : 'INTACT'
+      };
+
+      // Log the export event
+      await logAuditEvent('export_requested', activeSession?.id);
+
+      // Create JSON file in cache directory (always writable)
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+      const fileName = `audit-trail-${timestamp}.json`;
+      const fileUri = `${FileSystem.cacheDirectory}${fileName}`;
+
+      // Write the audit trail to file
+      const jsonContent = JSON.stringify(exportData, null, 2);
+      await FileSystem.writeAsStringAsync(fileUri, jsonContent);
+
+      // Trigger native share sheet
+      await Sharing.shareAsync(fileUri, {
+        mimeType: 'application/json',
+        dialogTitle: 'Export Audit Trail',
+        UTI: 'public.json',
+      });
+
+    } catch (error) {
+      console.error('Export error:', error);
+      alert('Export failed: ' + (error instanceof Error ? error.message : 'Unknown error'));
+    }
+  };
 
   const saveProof = async (
     before: string,
@@ -800,7 +899,7 @@ const logEditingViolation = async (
     const now = Date.now();
     const startTime = new Date(meta.timestamp).getTime();
     const gapMs = now - startTime;
-    
+
 
     // Time gap constraints: 1 minute minimum, 24 hours maximum
     const MIN_GAP = 60 * 1000;
@@ -841,8 +940,8 @@ const logEditingViolation = async (
       return;
     }
 
-    
-     if (!activeSession || !activeSession.isActive) {
+
+    if (!activeSession || !activeSession.isActive) {
       setValidationError(
         'Session expired or invalid. Please start a new Before-After pair.'
       );
@@ -851,7 +950,7 @@ const logEditingViolation = async (
       return;
     }
 
-     // PAIRED SESSION LOCKING - Verify session consistency
+    // PAIRED SESSION LOCKING - Verify session consistency
     if (activeSession.beforeUri !== before) {
       setValidationError(
         'Session mismatch: "After" photo must belong to the same session as "Before" photo.'
@@ -929,25 +1028,25 @@ const logEditingViolation = async (
       timeSource: timeWindow.timeSource,
     });
 
-  const beforeIntegrity = await checkPhotoIntegrity(before, 'before', activeSession.id);
-const afterIntegrity = await checkPhotoIntegrity(after, 'after', activeSession.id);
+    const beforeIntegrity = await checkPhotoIntegrity(before, 'before', activeSession.id);
+    const afterIntegrity = await checkPhotoIntegrity(after, 'after', activeSession.id);
 
 
-  if (!beforeIntegrity.isValid || !afterIntegrity.isValid) {
-    const violationCount = beforeIntegrity.violations.length + afterIntegrity.violations.length;
-    setValidationError(
-      `EDITING DETECTED: ${violationCount} violation(s) found. Photos cannot be edited.`
-    );
-    setAfterTaken(false);
-  setAfterUri(null);
-    // Don't save proof if edited
-    return;
-  }
+    if (!beforeIntegrity.isValid || !afterIntegrity.isValid) {
+      const violationCount = beforeIntegrity.violations.length + afterIntegrity.violations.length;
+      setValidationError(
+        `EDITING DETECTED: ${violationCount} violation(s) found. Photos cannot be edited.`
+      );
+      setAfterTaken(false);
+      setAfterUri(null);
+      // Don't save proof if edited
+      return;
+    }
 
     // PAIRED SESSION LOCKING - Validate session continuity
-   
 
-   
+
+
 
     // Clear any previous errors
     setValidationError(null);
@@ -956,10 +1055,10 @@ const afterIntegrity = await checkPhotoIntegrity(after, 'after', activeSession.i
     const bHash = await hashImage(before, beforeLoc);
     const aHash = await hashImage(after, afterLoc);
 
-    
 
 
-    
+
+
 
 
     // Create master proof hash including GPS data and time window
@@ -1003,8 +1102,9 @@ const afterIntegrity = await checkPhotoIntegrity(after, 'after', activeSession.i
       // USER-DECLARED TIME WINDOW ENFORCEMENT - Append time window data to proof
       timeWindow: updatedTimeWindow,
       timeAnomalies: getDetectedAnomalies(),
-      creatorDeviceId: await getDeviceId(), // WITNESS DEDUPLICATION - Store device that created this proof
     };
+
+
 
     const existing = await AsyncStorage.getItem('proofs');
     const proofs = existing ? JSON.parse(existing) : [];
@@ -1016,29 +1116,6 @@ const afterIntegrity = await checkPhotoIntegrity(after, 'after', activeSession.i
 
     await AsyncStorage.setItem('proofs', JSON.stringify(limitedProofs));
 
-    // 🌐 PEER-TO-PEER NETWORK - Upload proof metadata to Firebase witness network
-    // Only uploads cryptographic hashes and verification code, NOT photo files
-    // This allows other devices to witness and verify this proof
-    try {
-      const uploadSuccess = await uploadProofMetadata({
-        verificationCode: proof.verificationCode,
-        sessionId: proof.sessionId,
-        beforeHash: proof.beforeHash,
-        afterHash: proof.afterHash,
-        timestamp: proof.createdAt,
-        creatorDeviceId: proof.creatorDeviceId, // WITNESS DEDUPLICATION - Include creator info
-      });
-      
-      if (uploadSuccess) {
-        console.log('📡 Proof registered to peer-to-peer network');
-        // Optionally trigger a manual sync to get it into the local witness db
-        await manualSync();
-      }
-    } catch (error) {
-      // Non-blocking: network registration is optional
-      console.warn('⚠️ Failed to register proof to network (offline?)', error);
-    }
-
     // AUDIT TRAIL - Log proof creation
     await logAuditEvent('proof_created', activeSession.id, proof.id, afterLoc, {
       verificationCode: verificationCode,
@@ -1049,21 +1126,18 @@ const afterIntegrity = await checkPhotoIntegrity(after, 'after', activeSession.i
     // This is a REAL submission to a third-party timestamp authority with proper RFC 3161 format
     // Sends ASN.1 DER-encoded TimeStampReq to DigiCert for cryptographic timestamping
     // If network is down, it will fail visibly (and the proof will still be valid, just unanchored)
-        try {
+    try {
       const anchorService = getAnchorService();
       await anchorService.initialize();
-      
-      // Enable real RFC 3161 TSA for DigiCert - with proper binary DER encoding
-anchorService.enableRealTSA(FREETSA)
-      
+
       // REAL TSA submission - RFC 3161 binary DER format (proper implementation)
       // TimeStampReq is ASN.1 DER encoded, sent to DigiCert, returns signed TimeStampToken
       const externalAnchor = await anchorService.submitProofToTSA(proofHash);
-      
+
       if (externalAnchor) {
         // Add anchor to proof metadata (externalAnchor is already properly formatted ExternalAnchor type)
         proof.externalAnchor = externalAnchor;
-        
+
         // CRITICAL: Re-save proofs with updated anchor data
         const existing = await AsyncStorage.getItem('proofs');
         const proofs = existing ? JSON.parse(existing) : [];
@@ -1072,7 +1146,7 @@ anchorService.enableRealTSA(FREETSA)
           proofs[proofIndex] = proof;
           await AsyncStorage.setItem('proofs', JSON.stringify(proofs));
         }
-        
+
         console.log('[ANCHOR] ✅ Proof anchored to real TSA:', proofHash.substring(0, 16));
         console.log('[ANCHOR] Token from:', externalAnchor.tsaName);
         console.log('[ANCHOR] Timestamp:', externalAnchor.authenticatedTime);
@@ -1082,7 +1156,7 @@ anchorService.enableRealTSA(FREETSA)
       const errorMessage = error instanceof Error ? error.message : String(error);
       console.error('[ANCHOR] ❌ TSA anchoring FAILED:', errorMessage);
       console.warn('[ANCHOR] Proof is still valid, but NOT externally anchored');
-      
+
       // Set FAILED anchor status with error reason so user knows what happened
       proof.externalAnchor = {
         status: 'failed',
@@ -1092,7 +1166,7 @@ anchorService.enableRealTSA(FREETSA)
         tsaName: 'DigiCert',
         tsaUrl: DIGICERT_TSA.url,
       };
-      
+
       // Save failed state as well - important for auditing
       const existing = await AsyncStorage.getItem('proofs');
       const proofs = existing ? JSON.parse(existing) : [];
@@ -1101,44 +1175,50 @@ anchorService.enableRealTSA(FREETSA)
         proofs[proofIndex] = proof;
         await AsyncStorage.setItem('proofs', JSON.stringify(proofs));
       }
-      
+
       // Log the failure for audit trail
       await logAuditEvent('anchor_failed', activeSession?.id, proof.id, afterLoc, {
         error: errorMessage,
         tsaName: DIGICERT_TSA.name,
       });
-      
+
       // Non-blocking: anchoring is optional, proof remains valid
       // User will see ❌ TSA Failed with reason
     }
 
     // PAIRED SESSION LOCKING - Complete the session and reset all UI
     await completeSession();
+
+    // CRYPTOGRAPHIC SIGNING - Upload proof with signature and generate PIN
+    // This happens AFTER UI is reset so the modal appears on top of the clean state
+    setTimeout(() => {
+      uploadAndGeneratePin(proof);
+    }, 500);
   };
 
   // PERFORMANCE FIX 6 - Pre-initialize camera permissions on app start
+  // CRYPTOGRAPHIC SIGNING - Generate worker keypair on first launch
   useEffect(() => {
     const initializeApp = async () => {
       try {
         console.log('[PERF] Pre-requesting camera permissions...');
+        console.log('[CRYPTO] Generating worker keypair if needed...');
+
+        // Generate Ed25519 keypair on first app launch (idempotent)
+        await generateWorkerKeypair();
+
         // This caches the permission so it's instant when user clicks button
         if (permission && !permission.granted) {
           // Just request, don't require user to grant right now
           // The useCameraPermissions hook already manages this
         }
-        
-        // Initialize Firebase and start witness network sync
-        try {
-          if (initFirebaseOnStartup) initFirebaseOnStartup();
-          if (startPeriodicSync) startPeriodicSync();
-        } catch (e) {
-          console.warn('Network initialization skipped:', e);
-        }
+
+        console.log('[PERF] App initialization complete');
       } catch (error) {
         console.log('[PERF] Permission pre-init error (non-critical):', error);
       }
     };
-    
+
     initializeApp();
   }, []);
 
@@ -1226,43 +1306,43 @@ anchorService.enableRealTSA(FREETSA)
 
   // PAIRED SESSION LOCKING - Check for existing sessions on component mount
   useEffect(() => {
-  const initializeApp = async () => {
-    // 1. Check for existing session
-    const hasActiveSession = await validateActiveSession();
-    if (hasActiveSession && activeSession) {
-      setBeforeUri(activeSession.beforeUri);
-      setBeforeTaken(true);
-      setMetadata(activeSession.metadata);
-      setBeforeLocation(activeSession.beforeLocation);
-      setMode('after');
-    }
-    
-    // 2. Check if we have data to export
-    await checkExportDataExists();
-    
-    // 3. Load tamper warnings
-    try {
-      const data = await AsyncStorage.getItem('tamperWarnings');
-      if (data) {
-        setTamperWarnings(JSON.parse(data));
+    const initializeApp = async () => {
+      // 1. Check for existing session
+      const hasActiveSession = await validateActiveSession();
+      if (hasActiveSession && activeSession) {
+        setBeforeUri(activeSession.beforeUri);
+        setBeforeTaken(true);
+        setMetadata(activeSession.metadata);
+        setBeforeLocation(activeSession.beforeLocation);
+        setMode('after');
       }
-    } catch (error) {
-      console.error('Error loading tamper warnings:', error);
-    }
 
-    // 4. Load editing violations
-    try {
-      const violationData = await AsyncStorage.getItem('editingViolations');
-      if (violationData) {
-        setEditingViolations(JSON.parse(violationData));
+      // 2. Check if we have data to export
+      await checkExportDataExists();
+
+      // 3. Load tamper warnings
+      try {
+        const data = await AsyncStorage.getItem('tamperWarnings');
+        if (data) {
+          setTamperWarnings(JSON.parse(data));
+        }
+      } catch (error) {
+        console.error('Error loading tamper warnings:', error);
       }
-    } catch (error) {
-      console.error('Error loading editing violations:', error);
-    }
-  };
 
-initializeApp();
-}, []);
+      // 4. Load editing violations
+      try {
+        const violationData = await AsyncStorage.getItem('editingViolations');
+        if (violationData) {
+          setEditingViolations(JSON.parse(violationData));
+        }
+      } catch (error) {
+        console.error('Error loading editing violations:', error);
+      }
+    };
+
+    initializeApp();
+  }, []);
 
   // Refresh warnings and export data availability when screen comes into focus
   useFocusEffect(
@@ -1271,7 +1351,7 @@ initializeApp();
         try {
           // Refresh export data status
           await checkExportDataExists();
-          
+
           // Refresh tamper warnings
           const data = await AsyncStorage.getItem('tamperWarnings');
           if (data) {
@@ -1316,7 +1396,7 @@ initializeApp();
           <Text style={styles.welcomeDescription}>
             Capture verified before and after photos with cryptographic proof and timestamp authentication.
           </Text>
-          <TouchableOpacity 
+          <TouchableOpacity
             style={styles.proceedButton}
             onPress={() => setHasProceeded(true)}
           >
@@ -1350,7 +1430,7 @@ initializeApp();
 
               try {
                 console.log('[PERF] Capture button clicked:', Date.now());
-                
+
                 if (!cameraRef.current) {
                   throw new Error('Camera not available');
                 }
@@ -1374,7 +1454,7 @@ initializeApp();
                     // Fetch GPS with timeout and fallback
                     console.log('[PERF] Fetching GPS for BEFORE:', Date.now());
                     const beforeLoc = await fetchGPSWithFallback(5000);
-                    
+
                     if (!beforeLoc) {
                       throw new Error('Unable to get location. Please enable GPS and try again.');
                     }
@@ -1412,7 +1492,7 @@ initializeApp();
                     console.log('[PERF] BEFORE photo complete:', Date.now());
                   } else {
                     console.log('[PERF] Processing AFTER photo:', Date.now());
-                    
+
                     // Validate session
                     const hasValidSession = await validateActiveSession();
                     if (!hasValidSession) {
@@ -1422,7 +1502,7 @@ initializeApp();
                     // Fetch GPS with timeout and fallback
                     console.log('[PERF] Fetching GPS for AFTER:', Date.now());
                     const afterLoc = await fetchGPSWithFallback(5000);
-                    
+
                     if (!afterLoc) {
                       throw new Error('Unable to get location. Please enable GPS and try again.');
                     }
@@ -1449,7 +1529,7 @@ initializeApp();
                     InteractionManager.runAfterInteractions(() => {
                       console.log('[PERF] Background: logging after_capture and saving proof:', Date.now());
                       logAuditEvent('after_capture', activeSession?.id, undefined, afterLoc);
-                      
+
                       if (beforeUri && metadata && beforeLocation && activeSession) {
                         saveProof(beforeUri, photo.uri, metadata, beforeLocation, afterLoc);
                       }
@@ -1461,7 +1541,7 @@ initializeApp();
                   console.error('[PERF] Error processing photo:', error);
                   const errorMsg = error instanceof Error ? error.message : 'Error processing photo';
                   setValidationError(errorMsg);
-                  
+
                   // Reset photo state on error
                   if (mode === 'before') {
                     setBeforeUri(null);
@@ -1470,7 +1550,7 @@ initializeApp();
                     setAfterUri(null);
                     setAfterTaken(false);
                   }
-                  
+
                   // Keep camera open on error so user can retry
                   setShowCamera(true);
                 }
@@ -1493,7 +1573,7 @@ initializeApp();
 
   return (
     <SafeAreaView style={styles.safeArea}>
-      <ScrollView 
+      <ScrollView
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
@@ -1525,7 +1605,7 @@ initializeApp();
               <Ionicons name="document-text" size={20} color="#3b82f6" />
               <Text style={styles.cardTitle}>Job Details</Text>
             </View>
-            
+
             <TextInput
               style={styles.input}
               placeholder="Job ID (optional)"
@@ -1533,7 +1613,7 @@ initializeApp();
               value={jobId}
               onChangeText={setJobId}
             />
-            
+
             <TextInput
               style={styles.input}
               placeholder="Client Name (optional)"
@@ -1541,7 +1621,7 @@ initializeApp();
               value={clientName}
               onChangeText={setClientName}
             />
-            
+
             <TouchableOpacity
               style={styles.primaryButton}
               onPress={() => {
@@ -1612,11 +1692,11 @@ initializeApp();
               <Ionicons name="time" size={20} color="#0ea5e9" />
               <Text style={styles.cardTitle}>User-Declared Time Window</Text>
             </View>
-            
+
             <Text style={styles.timeWindowDescription}>
               Define the expected time between Before and After photos. This window is immutable once a session starts.
             </Text>
-            
+
             <View style={styles.timeWindowInputContainer}>
               <View style={styles.timeWindowInputGroup}>
                 <Text style={styles.timeWindowLabel}>Minimum Time (minutes):</Text>
@@ -1699,13 +1779,13 @@ initializeApp();
                 ⚠️ These values cannot be changed once the session starts.
               </Text>
             </View>
-            
+
             <TouchableOpacity
               style={styles.primaryButton}
               onPress={() => {
-                if (selectedMinTimeMin !== null && selectedMaxTimeMin !== null && 
-                    selectedMinTimeMin > 0 && selectedMaxTimeMin > 0 && 
-                    selectedMinTimeMin < selectedMaxTimeMin) {
+                if (selectedMinTimeMin !== null && selectedMaxTimeMin !== null &&
+                  selectedMinTimeMin > 0 && selectedMaxTimeMin > 0 &&
+                  selectedMinTimeMin < selectedMaxTimeMin) {
                   const minTimeMs = selectedMinTimeMin * 60 * 1000;
                   const maxTimeMs = selectedMaxTimeMin * 60 * 1000;
                   const timeWindowData: TimeWindowData = {
@@ -1872,8 +1952,8 @@ initializeApp();
                         timeWindowStatus === 'EXPIRED' && styles.timeWindowStatusBadgeExpired,
                       ]}>
                         {timeWindowStatus === 'VALID' ? '✅ Ready to capture' :
-                         timeWindowStatus === 'EXPIRED' ? '❌ Expired' :
-                         '⏳ Not ready yet'}
+                          timeWindowStatus === 'EXPIRED' ? '❌ Expired' :
+                            '⏳ Not ready yet'}
                       </Text>
                     )}
                   </View>
@@ -1890,7 +1970,7 @@ initializeApp();
                   console.log('[PERF] Already processing, ignoring click');
                   return;
                 }
-                
+
                 setMode('after');
                 setShowCamera(true);
               }}
@@ -1925,14 +2005,14 @@ initializeApp();
                   style={styles.dangerButton}
                   onPress={async () => {
                     if (!activeSession?.id) return;
-                    
+
                     Alert.alert(
                       'Delete Before Photo?',
                       'This will mark the entire session as "TAMPERED" and void any proof.',
                       [
                         { text: 'Cancel', style: 'cancel' },
-                        { 
-                          text: 'Delete & Void Session', 
+                        {
+                          text: 'Delete & Void Session',
                           style: 'destructive',
                           onPress: async () => {
                             await logTamperEvent('before_deleted', activeSession.id, undefined, 'User deleted before photo, voiding session');
@@ -2004,6 +2084,146 @@ initializeApp();
         {/* Bottom Spacing */}
         <View style={styles.bottomSpacer} />
       </ScrollView>
+
+      {/* Loading Overlay - Generating Code */}
+      {generatingCode && (
+        <Modal
+          visible={true}
+          transparent={true}
+          animationType="fade"
+        >
+          <View style={styles.loadingOverlay}>
+            <View style={styles.loadingCard}>
+              <ActivityIndicator size="large" color="#3b82f6" />
+              <Text style={styles.loadingTitle}>Generating Code</Text>
+              <Text style={styles.loadingSubtext}>Uploading and signing your proof...</Text>
+            </View>
+          </View>
+        </Modal>
+      )}
+
+      {/* PIN Sharing Modal */}
+      <Modal
+        visible={showPinModal}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={() => setShowPinModal(false)}
+      >
+        <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)' }}>
+          <ScrollView
+            contentContainerStyle={{
+              flexGrow: 1,
+              justifyContent: 'center',
+              paddingVertical: 40,
+              paddingBottom: 100
+            }}
+          >
+            <View style={{
+              backgroundColor: 'white',
+              margin: 20,
+              padding: 30,
+              borderRadius: 10
+            }}>
+              {/* Header */}
+              <Text style={styles.modalTitle}>✅ Work Completed!</Text>
+              <Text style={styles.modalSubtitle}>
+                Share this code with your client to verify your proof
+              </Text>
+
+              {/* Error Message */}
+              {pinError && (
+                <View style={styles.errorBoxPin}>
+                  <Text style={styles.errorTextPin}>{pinError}</Text>
+                </View>
+              )}
+
+              {/* PIN Display Box */}
+              <View style={styles.pinContainer}>
+                <Text style={styles.pinLabel}>Verification PIN</Text>
+                {currentPin ? (
+                  <View style={styles.pinBox}>
+                    <Text style={styles.pinNumber}>{currentPin}</Text>
+                  </View>
+                ) : (
+                  <View style={styles.pinBox}>
+                    <ActivityIndicator size="large" color="#4CAF50" />
+                  </View>
+                )}
+                <Text style={styles.pinNote}>
+                  10-character code • Unique to this proof
+                </Text>
+              </View>
+
+              {/* Action Buttons */}
+              {currentPin && (
+                <View style={styles.buttonContainer}>
+                  {/* Copy Button */}
+                  <TouchableOpacity
+                    style={styles.copyButton}
+                    onPress={async () => {
+                      try {
+                        await Clipboard.setStringAsync(currentPin);
+                        Alert.alert('Copied', 'PIN copied to clipboard');
+                      } catch (error) {
+                        console.error('Copy error:', error);
+                      }
+                    }}
+                  >
+                    <Text style={styles.copyButtonIcon}>📋</Text>
+                    <Text style={styles.copyButtonText}>Copy PIN</Text>
+                  </TouchableOpacity>
+
+                  {/* Share Button */}
+                  <TouchableOpacity
+                    style={styles.shareButton}
+                    onPress={async () => {
+                      try {
+                        await Share.share({
+                          message: `I have a verified proof for you.\n\nUse this PIN to verify: ${currentPin}\n\nThis is a cryptographically signed proof that you can verify with the BeforeAfter app`,
+                          title: 'Share Verification PIN',
+                        });
+                      } catch (error) {
+                        console.error('Share error:', error);
+                      }
+                    }}
+                  >
+                    <Text style={styles.shareButtonIcon}>✉️</Text>
+                    <Text style={styles.shareButtonText}>Share PIN</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+
+              {/* Info Box */}
+              <View style={styles.infoBox}>
+                <Text style={styles.infoText}>
+                  💡 <Text style={styles.infoBold}>How it works:</Text>
+                </Text>
+                <Text style={styles.infoText}>
+                  1. Share this PIN with the client
+                </Text>
+                <Text style={styles.infoText}>
+                  2. They enter it in their app
+                </Text>
+                <Text style={styles.infoText}>
+                  3. Your proof is verified cryptographically ✓
+                </Text>
+              </View>
+
+              {/* Done Button */}
+              <TouchableOpacity
+                style={[styles.doneButton, { marginTop: 10 }]}
+                onPress={() => {
+                  setShowPinModal(false);
+                  setCurrentPin('');
+                  setCurrentProofId('');
+                }}
+              >
+                <Text style={styles.doneButtonText}>Done</Text>
+              </TouchableOpacity>
+            </View>
+          </ScrollView>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -2021,7 +2241,7 @@ const styles = StyleSheet.create({
     padding: 16,
     paddingBottom: 100,
   },
-  
+
   // Welcome Screen
   welcomeContainer: {
     justifyContent: 'center',
@@ -2838,5 +3058,206 @@ const styles = StyleSheet.create({
     color: '#ef4444',
     fontSize: 14,
     fontWeight: '600',
+  },
+
+  // PIN Modal Styles
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'flex-end',
+  },
+
+  modalContent: {
+    backgroundColor: '#fff',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    padding: 20,
+    paddingBottom: 30,
+    maxHeight: '80%',
+  },
+
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#000',
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+
+  modalSubtitle: {
+    fontSize: 14,
+    color: '#666',
+    textAlign: 'center',
+    marginBottom: 20,
+    lineHeight: 20,
+  },
+
+  errorBoxPin: {
+    backgroundColor: '#ffebee',
+    borderLeftWidth: 4,
+    borderLeftColor: '#f44336',
+    padding: 12,
+    marginBottom: 16,
+    borderRadius: 4,
+  },
+
+  errorTextPin: {
+    color: '#c62828',
+    fontSize: 13,
+    fontWeight: '500',
+  },
+
+  pinContainer: {
+    marginVertical: 20,
+    alignItems: 'center',
+  },
+
+  pinLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#999',
+    textTransform: 'uppercase',
+    marginBottom: 10,
+    letterSpacing: 1,
+  },
+
+  pinBox: {
+    backgroundColor: '#f5f5f5',
+    borderWidth: 2,
+    borderColor: '#4CAF50',
+    borderRadius: 12,
+    padding: 20,
+    marginBottom: 12,
+    width: '100%',
+    minHeight: 80,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+
+  pinNumber: {
+    fontSize: 32,
+    fontWeight: '800',
+    color: '#4CAF50',
+    textAlign: 'center',
+    fontFamily: 'monospace',
+    letterSpacing: 2,
+  },
+
+  pinNote: {
+    fontSize: 12,
+    color: '#999',
+    textAlign: 'center',
+  },
+
+  buttonContainer: {
+    flexDirection: 'row',
+    gap: 12,
+    marginVertical: 20,
+  },
+
+  copyButton: {
+    flex: 1,
+    backgroundColor: '#e3f2fd',
+    paddingVertical: 14,
+    borderRadius: 8,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#2196F3',
+  },
+
+  copyButtonIcon: {
+    fontSize: 20,
+    marginBottom: 4,
+  },
+
+  copyButtonText: {
+    color: '#2196F3',
+    fontWeight: '600',
+    fontSize: 13,
+  },
+
+  shareButton: {
+    flex: 1,
+    backgroundColor: '#e8f5e9',
+    paddingVertical: 14,
+    borderRadius: 8,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#4CAF50',
+  },
+
+  shareButtonIcon: {
+    fontSize: 20,
+    marginBottom: 4,
+  },
+
+  shareButtonText: {
+    color: '#4CAF50',
+    fontWeight: '600',
+    fontSize: 13,
+  },
+
+  infoBox: {
+    backgroundColor: '#fff3e0',
+    borderLeftWidth: 4,
+    borderLeftColor: '#ff9800',
+    padding: 12,
+    marginVertical: 16,
+    borderRadius: 4,
+  },
+
+  infoText: {
+    fontSize: 13,
+    color: '#555',
+    marginBottom: 6,
+    lineHeight: 18,
+  },
+
+  infoBold: {
+    fontWeight: '700',
+    color: '#333',
+  },
+
+  doneButton: {
+    backgroundColor: '#4CAF50',
+    paddingVertical: 14,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+
+  doneButtonText: {
+    color: '#fff',
+    fontWeight: '700',
+    fontSize: 16,
+  },
+
+  loadingOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loadingCard: {
+    backgroundColor: '#ffffff',
+    borderRadius: 16,
+    padding: 40,
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 12,
+    elevation: 8,
+  },
+  loadingTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#1e293b',
+    marginTop: 16,
+    marginBottom: 8,
+  },
+  loadingSubtext: {
+    fontSize: 14,
+    color: '#64748b',
+    textAlign: 'center',
   },
 });

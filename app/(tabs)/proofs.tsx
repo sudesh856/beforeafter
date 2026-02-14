@@ -1,6 +1,5 @@
 import { ExportButtons } from '@/components/ExportButtons';
 import { ProofFingerprint } from '@/components/ProofFingerprint';
-import { WitnessBadge } from '@/components/WitnessBadge';
 import { ProofRecord } from '@/lib/proof';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -284,13 +283,7 @@ function ProofCard({
           <Text style={styles.timestamp}>{timestamp}</Text>
         </View>
 
-        {/* 🌐 Witness Network Badge - Shows network verification status */}
-        <WitnessBadge 
-          verificationCode={proof.verificationCode} 
-          isTampered={tampered}
-        />
-
-        {/* 🆕 Mini Fingerprint */}
+        {/*  Mini Fingerprint */}
         <View style={styles.miniFingerprint}>
           <ProofFingerprint 
             hash={proof.afterHash} 

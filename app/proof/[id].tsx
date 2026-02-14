@@ -1,8 +1,8 @@
 import { ExportButtons } from '@/components/ExportButtons';
 import { ProofFingerprint } from '@/components/ProofFingerprint';
 import {
-    getAnchorConfidenceLevel,
-    getAnchorSummary,
+  getAnchorConfidenceLevel,
+  getAnchorSummary,
 } from '@/lib/anchoring/verifyAnchor';
 import { ExternalAnchor, LocationData, ProofRecord } from '@/lib/proof';
 import { generateWorkNarrative, isApiKeyConfigured } from '@/services/aiNarrationService';
@@ -90,9 +90,9 @@ export default function ProofDetail() {
     const a =
       Math.sin(dLat / 2) * Math.sin(dLat / 2) +
       Math.cos((lat1 * Math.PI) / 180) *
-        Math.cos((lat2 * Math.PI) / 180) *
-        Math.sin(dLon / 2) *
-        Math.sin(dLon / 2);
+      Math.cos((lat2 * Math.PI) / 180) *
+      Math.sin(dLon / 2) *
+      Math.sin(dLon / 2);
     const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
     return R * c;
   };
@@ -191,7 +191,7 @@ export default function ProofDetail() {
       // Compare recomputed proofHash to stored proofHash
       // This is the SINGLE SOURCE OF TRUTH for verification
       const isVerified = recomputedProofHash === proofRecord.proofHash;
-      
+
       // Set verification status based on hash comparison
       if (isVerified) {
         setVerificationStatus('matched');
@@ -221,7 +221,7 @@ export default function ProofDetail() {
         // --- 2b: Time gap validation ---
         const startTime = new Date(proofRecord.createdAt).getTime();
         const endTime = Number(proofRecord.id);
-        
+
         if (!isNaN(endTime) && startTime > 0) {
           const gapMs = endTime - startTime;
 
@@ -377,7 +377,7 @@ export default function ProofDetail() {
             accuracy: null,
           };
         }
-        
+
         setProof(found);
 
         // Run verification immediately when proof loads
@@ -391,21 +391,21 @@ export default function ProofDetail() {
 
   const handleDeleteProof = async () => {
     if (!proof) return;
-    
+
     try {
       const stored = await AsyncStorage.getItem('proofs');
       if (!stored) return;
 
       const list: ProofRecord[] = JSON.parse(stored);
       const filtered = list.filter(p => p.id !== proof.id);
-      
+
       console.log('Deleting proof...');
       await AsyncStorage.setItem('proofs', JSON.stringify(filtered));
-      
+
       // Small delay to ensure AsyncStorage completes
       await new Promise(resolve => setTimeout(resolve, 100));
       console.log('Proof deleted, navigating back...');
-      
+
       router.back();
     } catch (error) {
       console.error('Delete proof error:', error);
@@ -431,477 +431,477 @@ export default function ProofDetail() {
     <>
       <Stack.Screen options={{ title: 'Proof', headerShown: true }} />
       <SafeAreaView style={styles.container}>
-      <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
-        {/* Header Section */}
-        <View style={styles.headerSection}>
-          <View style={styles.headerTop}>
-            <View style={styles.titleContainer}>
-              <Ionicons name="shield-checkmark" size={32} color="#3b82f6" />
-              <Text style={styles.headerTitle}>Proof Verification</Text>
+        <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
+          {/* Header Section */}
+          <View style={styles.headerSection}>
+            <View style={styles.headerTop}>
+              <View style={styles.titleContainer}>
+                <Ionicons name="shield-checkmark" size={32} color="#3b82f6" />
+                <Text style={styles.headerTitle}>Proof Verification</Text>
+              </View>
             </View>
-          </View>
-          <Text style={styles.headerDate}>{new Date(proof.createdAt).toLocaleString()}</Text>
-        </View>
-
-        {/* BEFORE PHOTO SECTION */}
-        <View style={styles.photoSection}>
-          <View style={styles.photoHeader}>
-            <Ionicons name="camera" size={20} color="#3b82f6" />
-            <Text style={styles.photoTitle}>Before Photo</Text>
+            <Text style={styles.headerDate}>{new Date(proof.createdAt).toLocaleString()}</Text>
           </View>
 
-          {proof.beforeUri && (
-            <Image
-              source={{ uri: proof.beforeUri }}
-              style={styles.fullPhoto}
-              resizeMode="cover"
-            />
-          )}
+          {/* BEFORE PHOTO SECTION */}
+          <View style={styles.photoSection}>
+            <View style={styles.photoHeader}>
+              <Ionicons name="camera" size={20} color="#3b82f6" />
+              <Text style={styles.photoTitle}>Before Photo</Text>
+            </View>
 
-          {proof.createdAt && (
-            <Text style={styles.photoMetadata}>
-              📅 {new Date(proof.createdAt).toLocaleString()}
-            </Text>
-          )}
-          {proof.beforeLocation && (
-            <Text style={styles.photoMetadata}>
-              📍 {proof.beforeLocation.latitude.toFixed(5)}, {proof.beforeLocation.longitude.toFixed(5)}
-            </Text>
-          )}
-        </View>
+            {proof.beforeUri && (
+              <Image
+                source={{ uri: proof.beforeUri }}
+                style={styles.fullPhoto}
+                resizeMode="cover"
+              />
+            )}
 
-        {/* AFTER PHOTO SECTION */}
-        <View style={styles.photoSection}>
-          <View style={styles.photoHeader}>
-            <Ionicons name="camera" size={20} color="#10b981" />
-            <Text style={styles.photoTitle}>After Photo</Text>
+            {proof.createdAt && (
+              <Text style={styles.photoMetadata}>
+                📅 {new Date(proof.createdAt).toLocaleString()}
+              </Text>
+            )}
+            {proof.beforeLocation && (
+              <Text style={styles.photoMetadata}>
+                📍 {proof.beforeLocation.latitude.toFixed(5)}, {proof.beforeLocation.longitude.toFixed(5)}
+              </Text>
+            )}
           </View>
 
-          {proof.afterUri && (
-            <Image
-              source={{ uri: proof.afterUri }}
-              style={styles.fullPhoto}
-              resizeMode="cover"
-            />
-          )}
+          {/* AFTER PHOTO SECTION */}
+          <View style={styles.photoSection}>
+            <View style={styles.photoHeader}>
+              <Ionicons name="camera" size={20} color="#10b981" />
+              <Text style={styles.photoTitle}>After Photo</Text>
+            </View>
 
-          {!isNaN(Number(proof.id)) && (
-            <Text style={styles.photoMetadata}>
-              📅 {new Date(Number(proof.id)).toLocaleString()}
-            </Text>
-          )}
-          {proof.afterLocation && (
-            <Text style={styles.photoMetadata}>
-              📍 {proof.afterLocation.latitude.toFixed(5)}, {proof.afterLocation.longitude.toFixed(5)}
-            </Text>
-          )}
-        </View>
+            {proof.afterUri && (
+              <Image
+                source={{ uri: proof.afterUri }}
+                style={styles.fullPhoto}
+                resizeMode="cover"
+              />
+            )}
 
-        {/* Verification Status Card */}
-        <View style={styles.card}>
-          <View style={styles.cardHeader}>
-            <Ionicons name="checkmark-circle" size={24} color="#3b82f6" />
-            <Text style={styles.cardTitle}>Integrity Check</Text>
+            {!isNaN(Number(proof.id)) && (
+              <Text style={styles.photoMetadata}>
+                📅 {new Date(Number(proof.id)).toLocaleString()}
+              </Text>
+            )}
+            {proof.afterLocation && (
+              <Text style={styles.photoMetadata}>
+                📍 {proof.afterLocation.latitude.toFixed(5)}, {proof.afterLocation.longitude.toFixed(5)}
+              </Text>
+            )}
           </View>
-          
-          {verificationStatus === 'verifying' && (
-            <View style={styles.statusContent}>
-              <Ionicons name="hourglass" size={20} color="#f59e0b" />
-              <Text style={styles.statusText}>Verifying proof integrity...</Text>
-            </View>
-          )}
-          {verificationStatus === 'matched' && (
-            <View style={[styles.statusContent, styles.successBg]}>
-              <Ionicons name="checkmark-circle" size={20} color="#10b981" />
-              <Text style={[styles.statusText, styles.successText]}>Hash verified — Data authentic</Text>
-            </View>
-          )}
-          {verificationStatus === 'mismatched' && (
-            <View style={[styles.statusContent, styles.errorBg]}>
-              <Ionicons name="alert-circle" size={20} color="#ef4444" />
-              <Text style={[styles.statusText, styles.errorText]}>Hash mismatch — Integrity compromised</Text>
-            </View>
-          )}
-          {verificationStatus === 'error' && (
-            <View style={[styles.statusContent, styles.warningBg]}>
-              <Ionicons name="warning" size={20} color="#f59e0b" />
-              <Text style={[styles.statusText, styles.warningText]}>Unable to verify</Text>
-            </View>
-          )}
-        </View>
 
-        {/* Verification Code */}
-        {proof.verificationCode && (
+          {/* Verification Status Card */}
           <View style={styles.card}>
             <View style={styles.cardHeader}>
-              <Ionicons name="qr-code" size={24} color="#3b82f6" />
-              <Text style={styles.cardTitle}>Verification Code</Text>
-            </View>
-            
-            <View style={styles.codeContainer}>
-              <Text style={styles.codeLabel}>Proof Identifier</Text>
-              <Text style={styles.codeValue} selectable>{proof.verificationCode}</Text>
+              <Ionicons name="checkmark-circle" size={24} color="#3b82f6" />
+              <Text style={styles.cardTitle}>Integrity Check</Text>
             </View>
 
-            {codeVerificationStatus === 'verifying' && (
-              <Text style={styles.codeStatusText}>Verifying code...</Text>
-            )}
-            {codeVerificationStatus === 'verified' && (
-              <View style={styles.codeStatusRow}>
-                <Ionicons name="checkmark-circle" size={16} color="#10b981" />
-                <Text style={[styles.codeStatusText, styles.successText]}>Verified — Proof intact</Text>
+            {verificationStatus === 'verifying' && (
+              <View style={styles.statusContent}>
+                <Ionicons name="hourglass" size={20} color="#f59e0b" />
+                <Text style={styles.statusText}>Verifying proof integrity...</Text>
               </View>
             )}
-            {codeVerificationStatus === 'invalid' && (
-              <View style={styles.codeStatusRow}>
-                <Ionicons name="alert-circle" size={16} color="#ef4444" />
-                <Text style={[styles.codeStatusText, styles.errorText]}>Invalid — Proof may be tampered</Text>
+            {verificationStatus === 'matched' && (
+              <View style={[styles.statusContent, styles.successBg]}>
+                <Ionicons name="checkmark-circle" size={20} color="#10b981" />
+                <Text style={[styles.statusText, styles.successText]}>Hash verified — Data authentic</Text>
               </View>
             )}
-            {codeVerificationStatus === 'error' && (
-              <View style={styles.codeStatusRow}>
-                <Ionicons name="warning" size={16} color="#f59e0b" />
-                <Text style={[styles.codeStatusText, styles.warningText]}>Unable to verify code</Text>
+            {verificationStatus === 'mismatched' && (
+              <View style={[styles.statusContent, styles.errorBg]}>
+                <Ionicons name="alert-circle" size={20} color="#ef4444" />
+                <Text style={[styles.statusText, styles.errorText]}>Hash mismatch — Integrity compromised</Text>
               </View>
             )}
-          </View>
-        )}
-
-        {/* 🆕 Visual Fingerprint Section */}
-        <View style={styles.fingerprintSection}>
-          <Text style={styles.sectionTitle}>🔐 Cryptographic Fingerprint</Text>
-          
-          <Text style={styles.sectionDescription}>
-            This unique pattern is mathematically generated from your proof's hash.
-            Any tampering will completely change this pattern.
-          </Text>
-          
-          <View style={styles.fingerprintContainer}>
-            <ProofFingerprint 
-              hash={proof.afterHash} 
-              size={280}
-              showChecksum={true}
-            />
-          </View>
-          
-          <Text style={styles.hashLabel}>Hash:</Text>
-          <Text style={styles.hashValue}>{proof.afterHash}</Text>
-        </View>
-
-        {/* Metadata Section */}
-        <View style={styles.card}>
-          <View style={styles.cardHeader}>
-            <Ionicons name="information-circle" size={24} color="#3b82f6" />
-            <Text style={styles.cardTitle}>Metadata</Text>
-          </View>
-          
-          <View style={styles.metadataGrid}>
-            <View style={styles.metadataItem}>
-              <Text style={styles.metadataLabel}>Device</Text>
-              <Text style={styles.metadataValue}>{proof.deviceName}</Text>
-            </View>
-            <View style={styles.metadataItem}>
-              <Text style={styles.metadataLabel}>Platform</Text>
-              <Text style={styles.metadataValue}>{proof.platform}</Text>
-            </View>
-            <View style={styles.metadataItem}>
-              <Text style={styles.metadataLabel}>Algorithm</Text>
-              <Text style={styles.metadataValue}>{proof.algorithmVersion ? `v${proof.algorithmVersion}` : '1.0.0'}</Text>
-            </View>
-          </View>
-        </View>
-
-        {/* GPS Location Section */}
-        <View style={styles.card}>
-          <View style={styles.cardHeader}>
-            <Ionicons name="map" size={24} color="#3b82f6" />
-            <Text style={styles.cardTitle}>GPS Locations</Text>
-          </View>
-
-          <View style={styles.locationItem}>
-            <View style={styles.locationBadge}>
-              <Ionicons name="camera" size={16} color="#3b82f6" />
-              <Text style={styles.locationLabel}>Before</Text>
-            </View>
-            <Text style={styles.coordinateText}>
-              {proof.beforeLocation.latitude.toFixed(5)}, {proof.beforeLocation.longitude.toFixed(5)}
-            </Text>
-            {proof.beforeLocation.accuracy !== null && (
-              <Text style={styles.accuracyText}>Accuracy: ±{proof.beforeLocation.accuracy.toFixed(0)}m</Text>
+            {verificationStatus === 'error' && (
+              <View style={[styles.statusContent, styles.warningBg]}>
+                <Ionicons name="warning" size={20} color="#f59e0b" />
+                <Text style={[styles.statusText, styles.warningText]}>Unable to verify</Text>
+              </View>
             )}
           </View>
 
-          <View style={styles.divider} />
-
-          <View style={styles.locationItem}>
-            <View style={styles.locationBadge}>
-              <Ionicons name="camera" size={16} color="#10b981" />
-              <Text style={styles.locationLabel}>After</Text>
-            </View>
-            <Text style={styles.coordinateText}>
-              {proof.afterLocation.latitude.toFixed(5)}, {proof.afterLocation.longitude.toFixed(5)}
-            </Text>
-            {proof.afterLocation.accuracy !== null && (
-              <Text style={styles.accuracyText}>Accuracy: ±{proof.afterLocation.accuracy.toFixed(0)}m</Text>
-            )}
-          </View>
-
-          {distance !== null && (
-            <>
-              <View style={styles.divider} />
-              <View style={styles.distanceRow}>
-                <Ionicons name="compass" size={18} color="#3b82f6" />
-                <View style={styles.distanceContent}>
-                  <Text style={styles.distanceLabel}>Distance Between Photos</Text>
-                  <Text style={styles.distanceValue}>{distance.toFixed(1)} m</Text>
-                </View>
+          {/* Verification Code */}
+          {proof.verificationCode && (
+            <View style={styles.card}>
+              <View style={styles.cardHeader}>
+                <Ionicons name="qr-code" size={24} color="#3b82f6" />
+                <Text style={styles.cardTitle}>Verification Code</Text>
               </View>
-            </>
-          )}
 
-          {locationStatus && (
-            <View style={[styles.statusBadge, locationStatus === 'matched' ? styles.successBadge : styles.errorBadge]}>
-              <Ionicons 
-                name={locationStatus === 'matched' ? 'checkmark-circle' : 'alert-circle'} 
-                size={16} 
-                color={locationStatus === 'matched' ? '#10b981' : '#ef4444'} 
-              />
-              <Text style={[styles.statusBadgeText, locationStatus === 'matched' ? styles.successText : styles.errorText]}>
-                {locationStatus === 'matched' ? 'Within allowed range' : 'Exceeds allowed range'}
-              </Text>
-            </View>
-          )}
-        </View>
-
-        {/* Time Analysis Section */}
-        <View style={styles.card}>
-          <View style={styles.cardHeader}>
-            <Ionicons name="time" size={24} color="#3b82f6" />
-            <Text style={styles.cardTitle}>Time Analysis</Text>
-          </View>
-
-          <View style={styles.timeItem}>
-            <View style={styles.timeBadge}>
-              <Ionicons name="play-circle" size={16} color="#3b82f6" />
-              <Text style={styles.timeLabel}>Work Started</Text>
-            </View>
-            <Text style={styles.timeValue}>{new Date(proof.createdAt).toLocaleTimeString()}</Text>
-            <Text style={styles.dateValue}>{new Date(proof.createdAt).toLocaleDateString()}</Text>
-          </View>
-
-          {!isNaN(Number(proof.id)) && (
-            <>
-              <View style={styles.divider} />
-              <View style={styles.timeItem}>
-                <View style={styles.timeBadge}>
-                  <Ionicons name="stop-circle" size={16} color="#10b981" />
-                  <Text style={styles.timeLabel}>Work Ended</Text>
-                </View>
-                <Text style={styles.timeValue}>{new Date(Number(proof.id)).toLocaleTimeString()}</Text>
-                <Text style={styles.dateValue}>{new Date(Number(proof.id)).toLocaleDateString()}</Text>
+              <View style={styles.codeContainer}>
+                <Text style={styles.codeLabel}>Proof Identifier</Text>
+                <Text style={styles.codeValue} selectable>{proof.verificationCode}</Text>
               </View>
-            </>
-          )}
 
-          {timeGap && (
-            <>
-              <View style={styles.divider} />
-              <View style={styles.timeGapRow}>
-                <Ionicons name="hourglass" size={18} color="#3b82f6" />
-                <View style={styles.timeGapContent}>
-                  <Text style={styles.timeGapLabel}>Work Window</Text>
-                  <Text style={styles.timeGapValue}>{timeGap}</Text>
-                </View>
-              </View>
-            </>
-          )}
-
-          {timeStatus && (
-            <View style={[styles.statusBadge, timeStatus === 'matched' ? styles.successBadge : styles.errorBadge]}>
-              <Ionicons 
-                name={timeStatus === 'matched' ? 'checkmark-circle' : 'alert-circle'} 
-                size={16} 
-                color={timeStatus === 'matched' ? '#10b981' : '#ef4444'} 
-              />
-              <Text style={[styles.statusBadgeText, timeStatus === 'matched' ? styles.successText : styles.errorText]}>
-                {timeStatus === 'matched' ? 'Realistic work window' : 'Implausible time window'}
-              </Text>
-            </View>
-          )}
-        </View>
-
-        {/* External Timestamp Anchor Section */}
-        <View style={styles.card}>
-          <View style={styles.cardHeader}>
-            <Ionicons name="link" size={24} color="#3b82f6" />
-            <Text style={styles.cardTitle}>External Timestamp Anchor</Text>
-          </View>
-
-          {proof.externalAnchor ? (
-            <>
-              {anchorLoading ? (
-                <View style={styles.statusContent}>
-                  <Ionicons name="hourglass" size={20} color="#f59e0b" />
-                  <Text style={styles.statusText}>Verifying anchor...</Text>
-                </View>
-              ) : anchorStatus ? (
-                <>
-                  <View style={[
-                    styles.statusBadge,
-                    anchorStatus.confidence === 'high' ? styles.successBadge :
-                    anchorStatus.confidence === 'medium' ? { backgroundColor: '#fef3c7', borderColor: '#fbbf24' } :
-                    styles.errorBadge
-                  ]}>
-                    <Ionicons 
-                      name={
-                        anchorStatus.confidence === 'high' ? 'checkmark-circle' :
-                        anchorStatus.confidence === 'medium' ? 'alert' :
-                        'close-circle'
-                      } 
-                      size={16} 
-                      color={
-                        anchorStatus.confidence === 'high' ? '#10b981' :
-                        anchorStatus.confidence === 'medium' ? '#f59e0b' :
-                        '#ef4444'
-                      } 
-                    />
-                    <Text style={[
-                      styles.statusBadgeText,
-                      anchorStatus.confidence === 'high' ? styles.successText :
-                      anchorStatus.confidence === 'medium' ? { color: '#92400e' } :
-                      styles.errorText
-                    ]}>
-                      {anchorStatus.humanSummary}
-                    </Text>
-                  </View>
-
-                  {anchorStatus.details && anchorStatus.details.length > 0 && (
-                    <View style={styles.detailsList}>
-                      {anchorStatus.details.map((detail: string, idx: number) => (
-                        <View key={idx} style={styles.detailItem}>
-                          <Text style={styles.detailBullet}>•</Text>
-                          <Text style={styles.detailText}>{detail}</Text>
-                        </View>
-                      ))}
-                    </View>
-                  )}
-                </>
-              ) : (
-                <Text style={styles.placeholderText}>Unable to verify anchor data</Text>
+              {codeVerificationStatus === 'verifying' && (
+                <Text style={styles.codeStatusText}>Verifying code...</Text>
               )}
-            </>
-          ) : (
-            <Text style={styles.placeholderText}>
-              This proof has not been anchored to an external timestamp. Once anchored, it will provide independent time verification.
-            </Text>
-          )}
-        </View>
-
-        {/* Technical Details Section */}
-        <View style={styles.card}>
-          <View style={styles.cardHeader}>
-            <Ionicons name="code-slash" size={24} color="#3b82f6" />
-            <Text style={styles.cardTitle}>Technical Details</Text>
-          </View>
-
-          <View style={styles.hashContainer}>
-            <Text style={styles.hashLabel}>Before Hash (SHA-256)</Text>
-            <Text style={styles.hashValue} selectable>{proof.beforeHash}</Text>
-          </View>
-
-          <View style={styles.divider} />
-
-          <View style={styles.hashContainer}>
-            <Text style={styles.hashLabel}>After Hash (SHA-256)</Text>
-            <Text style={styles.hashValue} selectable>{proof.afterHash}</Text>
-          </View>
-
-          <View style={styles.divider} />
-
-          <View style={styles.hashContainer}>
-            <Text style={styles.hashLabel}>Proof Hash (SHA-256)</Text>
-            <Text style={styles.hashValue} selectable>{proof.proofHash}</Text>
-          </View>
-        </View>
-
-        {/* AI Work Narrative Section */}
-        <View style={styles.aiNarrativeSection}>
-          <View style={styles.cardHeader}>
-            <Ionicons name="create" size={24} color="#3b82f6" />
-            <Text style={styles.cardTitle}>AI Work Narrative</Text>
-          </View>
-          
-          {!aiReport && !generatingReport && (
-            <TouchableOpacity
-              style={styles.generateButton}
-              onPress={handleGenerateNarrative}
-            >
-              <Text style={styles.generateButtonText}>✍️ Generate Work Report</Text>
-            </TouchableOpacity>
-          )}
-
-          {generatingReport && (
-            <View style={styles.aiLoadingContainer}>
-              <ActivityIndicator size="large" color="#007AFF" />
-              <Text style={styles.aiLoadingText}>AI analyzing photos...</Text>
+              {codeVerificationStatus === 'verified' && (
+                <View style={styles.codeStatusRow}>
+                  <Ionicons name="checkmark-circle" size={16} color="#10b981" />
+                  <Text style={[styles.codeStatusText, styles.successText]}>Verified — Proof intact</Text>
+                </View>
+              )}
+              {codeVerificationStatus === 'invalid' && (
+                <View style={styles.codeStatusRow}>
+                  <Ionicons name="alert-circle" size={16} color="#ef4444" />
+                  <Text style={[styles.codeStatusText, styles.errorText]}>Invalid — Proof may be tampered</Text>
+                </View>
+              )}
+              {codeVerificationStatus === 'error' && (
+                <View style={styles.codeStatusRow}>
+                  <Ionicons name="warning" size={16} color="#f59e0b" />
+                  <Text style={[styles.codeStatusText, styles.warningText]}>Unable to verify code</Text>
+                </View>
+              )}
             </View>
           )}
 
-          {aiReport && (
-            <View style={styles.reportContainer}>
-              <ScrollView 
-                style={styles.reportScrollView}
-                nestedScrollEnabled={true}
-                scrollEnabled={true}
-                showsVerticalScrollIndicator={true}
-              >
-                <Text style={styles.reportText}>{aiReport.replace(/\*\*/g, '').replace(/#{1,6}\s/g, '')}</Text>
-              </ScrollView>
-              
-              <View style={styles.reportActions}>
-                <TouchableOpacity
-                  style={styles.copyButton}
-                  onPress={copyReportToClipboard}
-                >
-                  <Text style={styles.copyButtonText}>📋 Copy Report</Text>
-                </TouchableOpacity>
-                
-                <TouchableOpacity
-                  style={styles.regenerateButton}
-                  onPress={handleGenerateNarrative}
-                >
-                  <Text style={styles.regenerateButtonText}>🔄 Regenerate</Text>
-                </TouchableOpacity>
+          {/* 🆕 Visual Fingerprint Section */}
+          <View style={styles.fingerprintSection}>
+            <Text style={styles.sectionTitle}>🔐 Cryptographic Fingerprint</Text>
+
+            <Text style={styles.sectionDescription}>
+              This unique pattern is mathematically generated from your proof's hash.
+              Any tampering will completely change this pattern.
+            </Text>
+
+            <View style={styles.fingerprintContainer}>
+              <ProofFingerprint
+                hash={proof.afterHash}
+                size={280}
+                showChecksum={true}
+              />
+            </View>
+
+            <Text style={styles.hashLabel}>Hash:</Text>
+            <Text style={styles.hashValue}>{proof.afterHash}</Text>
+          </View>
+
+          {/* Metadata Section */}
+          <View style={styles.card}>
+            <View style={styles.cardHeader}>
+              <Ionicons name="information-circle" size={24} color="#3b82f6" />
+              <Text style={styles.cardTitle}>Metadata</Text>
+            </View>
+
+            <View style={styles.metadataGrid}>
+              <View style={styles.metadataItem}>
+                <Text style={styles.metadataLabel}>Device</Text>
+                <Text style={styles.metadataValue}>{proof.deviceName}</Text>
+              </View>
+              <View style={styles.metadataItem}>
+                <Text style={styles.metadataLabel}>Platform</Text>
+                <Text style={styles.metadataValue}>{proof.platform}</Text>
+              </View>
+              <View style={styles.metadataItem}>
+                <Text style={styles.metadataLabel}>Algorithm</Text>
+                <Text style={styles.metadataValue}>{proof.algorithmVersion ? `v${proof.algorithmVersion}` : '1.0.0'}</Text>
               </View>
             </View>
-          )}
-        </View>
-
-        {/* Export and Delete Actions */}
-        <View style={styles.card}>
-          <View style={styles.cardHeader}>
-            <Ionicons name="download" size={24} color="#3b82f6" />
-            <Text style={styles.cardTitle}>Actions</Text>
           </View>
 
-          <ExportButtons proof={proof} />
+          {/* GPS Location Section */}
+          <View style={styles.card}>
+            <View style={styles.cardHeader}>
+              <Ionicons name="map" size={24} color="#3b82f6" />
+              <Text style={styles.cardTitle}>GPS Locations</Text>
+            </View>
 
-          <Pressable
-            style={({ pressed }: { pressed: boolean }) => [
-              styles.deleteButton,
-              pressed && styles.deleteButtonPressed
-            ]}
-            onPress={handleDeleteProof}
-          >
-            <Ionicons name="trash" size={20} color="#ffffff" />
-            <Text style={styles.deleteButtonText}>Delete Proof</Text>
-          </Pressable>
-        </View>
+            <View style={styles.locationItem}>
+              <View style={styles.locationBadge}>
+                <Ionicons name="camera" size={16} color="#3b82f6" />
+                <Text style={styles.locationLabel}>Before</Text>
+              </View>
+              <Text style={styles.coordinateText}>
+                {proof.beforeLocation.latitude.toFixed(5)}, {proof.beforeLocation.longitude.toFixed(5)}
+              </Text>
+              {proof.beforeLocation.accuracy !== null && (
+                <Text style={styles.accuracyText}>Accuracy: ±{proof.beforeLocation.accuracy.toFixed(0)}m</Text>
+              )}
+            </View>
 
-        {/* Spacing for safe area */}
-        <View style={{ height: 32 }} />
-      </ScrollView>
-    </SafeAreaView>
+            <View style={styles.divider} />
+
+            <View style={styles.locationItem}>
+              <View style={styles.locationBadge}>
+                <Ionicons name="camera" size={16} color="#10b981" />
+                <Text style={styles.locationLabel}>After</Text>
+              </View>
+              <Text style={styles.coordinateText}>
+                {proof.afterLocation.latitude.toFixed(5)}, {proof.afterLocation.longitude.toFixed(5)}
+              </Text>
+              {proof.afterLocation.accuracy !== null && (
+                <Text style={styles.accuracyText}>Accuracy: ±{proof.afterLocation.accuracy.toFixed(0)}m</Text>
+              )}
+            </View>
+
+            {distance !== null && (
+              <>
+                <View style={styles.divider} />
+                <View style={styles.distanceRow}>
+                  <Ionicons name="compass" size={18} color="#3b82f6" />
+                  <View style={styles.distanceContent}>
+                    <Text style={styles.distanceLabel}>Geospatial Seperation Between Capture Points</Text>
+                    <Text style={styles.distanceValue}>{distance.toFixed(1)} m</Text>
+                  </View>
+                </View>
+              </>
+            )}
+
+            {locationStatus && (
+              <View style={[styles.statusBadge, locationStatus === 'matched' ? styles.successBadge : styles.errorBadge]}>
+                <Ionicons
+                  name={locationStatus === 'matched' ? 'checkmark-circle' : 'alert-circle'}
+                  size={16}
+                  color={locationStatus === 'matched' ? '#10b981' : '#ef4444'}
+                />
+                <Text style={[styles.statusBadgeText, locationStatus === 'matched' ? styles.successText : styles.errorText]}>
+                  {locationStatus === 'matched' ? 'Within allowed range' : 'Exceeds allowed range'}
+                </Text>
+              </View>
+            )}
+          </View>
+
+          {/* Time Analysis Section */}
+          <View style={styles.card}>
+            <View style={styles.cardHeader}>
+              <Ionicons name="time" size={24} color="#3b82f6" />
+              <Text style={styles.cardTitle}>Time Analysis</Text>
+            </View>
+
+            <View style={styles.timeItem}>
+              <View style={styles.timeBadge}>
+                <Ionicons name="play-circle" size={16} color="#3b82f6" />
+                <Text style={styles.timeLabel}>Work Started</Text>
+              </View>
+              <Text style={styles.timeValue}>{new Date(proof.createdAt).toLocaleTimeString()}</Text>
+              <Text style={styles.dateValue}>{new Date(proof.createdAt).toLocaleDateString()}</Text>
+            </View>
+
+            {!isNaN(Number(proof.id)) && (
+              <>
+                <View style={styles.divider} />
+                <View style={styles.timeItem}>
+                  <View style={styles.timeBadge}>
+                    <Ionicons name="stop-circle" size={16} color="#10b981" />
+                    <Text style={styles.timeLabel}>Work Ended</Text>
+                  </View>
+                  <Text style={styles.timeValue}>{new Date(Number(proof.id)).toLocaleTimeString()}</Text>
+                  <Text style={styles.dateValue}>{new Date(Number(proof.id)).toLocaleDateString()}</Text>
+                </View>
+              </>
+            )}
+
+            {timeGap && (
+              <>
+                <View style={styles.divider} />
+                <View style={styles.timeGapRow}>
+                  <Ionicons name="hourglass" size={18} color="#3b82f6" />
+                  <View style={styles.timeGapContent}>
+                    <Text style={styles.timeGapLabel}>Work Window</Text>
+                    <Text style={styles.timeGapValue}>{timeGap}</Text>
+                  </View>
+                </View>
+              </>
+            )}
+
+            {timeStatus && (
+              <View style={[styles.statusBadge, timeStatus === 'matched' ? styles.successBadge : styles.errorBadge]}>
+                <Ionicons
+                  name={timeStatus === 'matched' ? 'checkmark-circle' : 'alert-circle'}
+                  size={16}
+                  color={timeStatus === 'matched' ? '#10b981' : '#ef4444'}
+                />
+                <Text style={[styles.statusBadgeText, timeStatus === 'matched' ? styles.successText : styles.errorText]}>
+                  {timeStatus === 'matched' ? 'Realistic work window' : 'Implausible time window'}
+                </Text>
+              </View>
+            )}
+          </View>
+
+          {/* External Timestamp Anchor Section */}
+          <View style={styles.card}>
+            <View style={styles.cardHeader}>
+              <Ionicons name="link" size={24} color="#3b82f6" />
+              <Text style={styles.cardTitle}>External Timestamp Anchor</Text>
+            </View>
+
+            {proof.externalAnchor ? (
+              <>
+                {anchorLoading ? (
+                  <View style={styles.statusContent}>
+                    <Ionicons name="hourglass" size={20} color="#f59e0b" />
+                    <Text style={styles.statusText}>Verifying anchor...</Text>
+                  </View>
+                ) : anchorStatus ? (
+                  <>
+                    <View style={[
+                      styles.statusBadge,
+                      anchorStatus.confidence === 'high' ? styles.successBadge :
+                        anchorStatus.confidence === 'medium' ? { backgroundColor: '#fef3c7', borderColor: '#fbbf24' } :
+                          styles.errorBadge
+                    ]}>
+                      <Ionicons
+                        name={
+                          anchorStatus.confidence === 'high' ? 'checkmark-circle' :
+                            anchorStatus.confidence === 'medium' ? 'alert' :
+                              'close-circle'
+                        }
+                        size={16}
+                        color={
+                          anchorStatus.confidence === 'high' ? '#10b981' :
+                            anchorStatus.confidence === 'medium' ? '#f59e0b' :
+                              '#ef4444'
+                        }
+                      />
+                      <Text style={[
+                        styles.statusBadgeText,
+                        anchorStatus.confidence === 'high' ? styles.successText :
+                          anchorStatus.confidence === 'medium' ? { color: '#92400e' } :
+                            styles.errorText
+                      ]}>
+                        {anchorStatus.humanSummary}
+                      </Text>
+                    </View>
+
+                    {anchorStatus.details && anchorStatus.details.length > 0 && (
+                      <View style={styles.detailsList}>
+                        {anchorStatus.details.map((detail: string, idx: number) => (
+                          <View key={idx} style={styles.detailItem}>
+                            <Text style={styles.detailBullet}>•</Text>
+                            <Text style={styles.detailText}>{detail}</Text>
+                          </View>
+                        ))}
+                      </View>
+                    )}
+                  </>
+                ) : (
+                  <Text style={styles.placeholderText}>Unable to verify anchor data</Text>
+                )}
+              </>
+            ) : (
+              <Text style={styles.placeholderText}>
+                This proof has not been anchored to an external timestamp. Once anchored, it will provide independent time verification.
+              </Text>
+            )}
+          </View>
+
+          {/* Technical Details Section */}
+          <View style={styles.card}>
+            <View style={styles.cardHeader}>
+              <Ionicons name="code-slash" size={24} color="#3b82f6" />
+              <Text style={styles.cardTitle}>Technical Details</Text>
+            </View>
+
+            <View style={styles.hashContainer}>
+              <Text style={styles.hashLabel}>Before Hash (SHA-256)</Text>
+              <Text style={styles.hashValue} selectable>{proof.beforeHash}</Text>
+            </View>
+
+            <View style={styles.divider} />
+
+            <View style={styles.hashContainer}>
+              <Text style={styles.hashLabel}>After Hash (SHA-256)</Text>
+              <Text style={styles.hashValue} selectable>{proof.afterHash}</Text>
+            </View>
+
+            <View style={styles.divider} />
+
+            <View style={styles.hashContainer}>
+              <Text style={styles.hashLabel}>Proof Hash (SHA-256)</Text>
+              <Text style={styles.hashValue} selectable>{proof.proofHash}</Text>
+            </View>
+          </View>
+
+          {/* AI Work Narrative Section */}
+          <View style={styles.aiNarrativeSection}>
+            <View style={styles.cardHeader}>
+              <Ionicons name="create" size={24} color="#3b82f6" />
+              <Text style={styles.cardTitle}>AI Work Narrative</Text>
+            </View>
+
+            {!aiReport && !generatingReport && (
+              <TouchableOpacity
+                style={styles.generateButton}
+                onPress={handleGenerateNarrative}
+              >
+                <Text style={styles.generateButtonText}>✍️ Generate Work Report</Text>
+              </TouchableOpacity>
+            )}
+
+            {generatingReport && (
+              <View style={styles.aiLoadingContainer}>
+                <ActivityIndicator size="large" color="#007AFF" />
+                <Text style={styles.aiLoadingText}>AI analyzing photos...</Text>
+              </View>
+            )}
+
+            {aiReport && (
+              <View style={styles.reportContainer}>
+                <ScrollView
+                  style={styles.reportScrollView}
+                  nestedScrollEnabled={true}
+                  scrollEnabled={true}
+                  showsVerticalScrollIndicator={true}
+                >
+                  <Text style={styles.reportText}>{aiReport.replace(/\*\*/g, '').replace(/#{1,6}\s/g, '')}</Text>
+                </ScrollView>
+
+                <View style={styles.reportActions}>
+                  <TouchableOpacity
+                    style={styles.copyButton}
+                    onPress={copyReportToClipboard}
+                  >
+                    <Text style={styles.copyButtonText}>📋 Copy Report</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={styles.regenerateButton}
+                    onPress={handleGenerateNarrative}
+                  >
+                    <Text style={styles.regenerateButtonText}>🔄 Regenerate</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            )}
+          </View>
+
+          {/* Export and Delete Actions */}
+          <View style={styles.card}>
+            <View style={styles.cardHeader}>
+              <Ionicons name="download" size={24} color="#3b82f6" />
+              <Text style={styles.cardTitle}>Actions</Text>
+            </View>
+
+            <ExportButtons proof={proof} />
+
+            <Pressable
+              style={({ pressed }: { pressed: boolean }) => [
+                styles.deleteButton,
+                pressed && styles.deleteButtonPressed
+              ]}
+              onPress={handleDeleteProof}
+            >
+              <Ionicons name="trash" size={20} color="#ffffff" />
+              <Text style={styles.deleteButtonText}>Delete Proof</Text>
+            </Pressable>
+          </View>
+
+          {/* Spacing for safe area */}
+          <View style={{ height: 32 }} />
+        </ScrollView>
+      </SafeAreaView>
     </>
   );
 }
