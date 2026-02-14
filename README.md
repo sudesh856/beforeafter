@@ -184,7 +184,30 @@ npm install
 mozar.t@yahoo.com
 ---
 
-## Technical Notes
+## Environment Configuration
+
+### API Key Setup
+
+This application requires API keys for AI-powered features. To maintain security and enable functionality:
+
+1. Create a `.env` file in the project root directory
+2. Add your API credentials:
+```
+GROQ_API_KEY=your_groq_api_key_here
+GOOGLE_AI_API_KEY=your_google_ai_key_here
+```
+
+3. Ensure `.env` is listed in your `.gitignore` file to prevent credential exposure
+
+**Note:** The AI narrative generation feature requires a valid Groq API key. Obtain your key from [https://groq.com](https://groq.com).
+
+### Security Best Practices
+
+- Never commit API keys to version control
+- Rotate keys periodically
+- Use environment-specific keys for development and production
+- Revoke compromised keys immediately
+
 
 ### Why Ed25519?
 - Fast signature generation and verification
