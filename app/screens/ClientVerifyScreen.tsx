@@ -1,5 +1,6 @@
 import { RATE_LIMIT_ATTEMPTS, RATE_LIMIT_LOCKOUT_MS } from '@/app/config/api';
 import {
+  canonicalizeProof,
   ProofObject,
   validateProof,
   verifyProofSignature,
@@ -7,6 +8,7 @@ import {
 import { fetchProofByPin } from '@/app/utils/proofUpload';
 import * as Clipboard from 'expo-clipboard';
 import { useRouter } from 'expo-router';
+import { sha256 } from 'js-sha256';
 import React, { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
@@ -29,6 +31,7 @@ interface ClientState {
   isVerified: boolean;
   attempts: number;
   lockoutUntil: number | null;
+  keyRotated?: boolean;
 }
 
 export default function ClientVerifyScreen() {
@@ -215,6 +218,7 @@ export default function ClientVerifyScreen() {
         ...prev,
         proof: canonicalProof, // Render the CLEAN object
         isVerified: true,
+        keyRotated: !!data.keyRotated, // Extract key rotation flag
         attempts: newAttempts,
         error: '',
       }));
@@ -274,6 +278,15 @@ export default function ClientVerifyScreen() {
           <View style={styles.verificationBanner}>
             <Text style={styles.verificationText}>✅ CRYPTOGRAPHICALLY VERIFIED</Text>
           </View>
+
+          {/* Key Rotation Warning */}
+          {state.keyRotated && (
+            <View style={[styles.verificationBanner, { backgroundColor: '#FFC107' }]}>
+              <Text style={[styles.verificationText, { color: '#000' }]}>
+                ⚠️ SIGNED WITH OLD KEY (ROTATED)
+              </Text>
+            </View>
+          )}
 
           {/* Proof display */}
           <View style={styles.proofContainer}>
@@ -338,6 +351,14 @@ export default function ClientVerifyScreen() {
               <Text style={styles.label}>Image Hash</Text>
               <Text style={[styles.value, styles.hash]}>
                 {state.proof.after.imageHash}
+              </Text>
+            </View>
+
+            {/* Proof Hash */}
+            <View style={styles.section}>
+              <Text style={styles.label}>Proof Hash</Text>
+              <Text style={[styles.value, styles.hash]}>
+                {sha256(canonicalizeProof(state.proof))}
               </Text>
             </View>
 

@@ -252,6 +252,20 @@ export const getWorkerPublicKey = async (): Promise<string> => {
 };
 
 /**
+ * Get the unique Key ID for the current worker keypair
+ * Key ID = SHA-256(Base64 Public Key)
+ */
+export const getKeyId = async (): Promise<string> => {
+  try {
+    const publicKey = await getWorkerPublicKey();
+    return sha256(publicKey);
+  } catch (error) {
+    console.error('❌ Error getting key ID:', error);
+    throw error;
+  }
+};
+
+/**
  * Validate proof structure before signing/displaying
  * Ensures all required fields exist
  */

@@ -4,6 +4,7 @@ import "time"
 
 type Proof struct {
 	ProofID   string    `json:"proofId"`
+	KeyID     string    `json:"keyId,omitempty"`
 	WorkerID  string    `json:"workerId"`
 	Before    Evidence  `json:"before"`
 	After     Evidence  `json:"after"`

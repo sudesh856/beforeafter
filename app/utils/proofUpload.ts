@@ -4,7 +4,7 @@
  */
 
 import { API_ENDPOINTS, API_TIMEOUT_MS } from '@/app/config/api';
-import { getWorkerPublicKey, ProofObject, signProof } from '@/app/utils/crypto';
+import { getKeyId, getWorkerPublicKey, ProofObject, signProof } from '@/app/utils/crypto';
 import * as SecureStore from 'expo-secure-store';
 
 /**
@@ -63,7 +63,12 @@ export const uploadProof = async (proof: ProofObject): Promise<string> => {
 
     // Step 2: Sign the proof
     console.log('✍️ Signing proof...');
-    const signature = await signProof(proof);
+
+    // Attach Key ID for versioning
+    const keyId = await getKeyId();
+    const proofWithKey = { ...proof, keyId };
+
+    const signature = await signProof(proofWithKey);
 
     // Step 3: Upload signed proof
     console.log('📝 Uploading signed proof to backend...');
@@ -74,7 +79,7 @@ export const uploadProof = async (proof: ProofObject): Promise<string> => {
     const response = await fetch(API_ENDPOINTS.uploadProof, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ proof, signature }),
+      body: JSON.stringify({ proof: proofWithKey, signature }),
       signal: controller.signal
     });
 
@@ -149,6 +154,7 @@ export const fetchProofByPin = async (pin: string): Promise<{
   proof: ProofObject;
   signature: string;
   workerPublicKey: string;
+  keyRotated?: boolean;
 }> => {
   try {
     console.log('🔍 Fetching proof with PIN:', pin);

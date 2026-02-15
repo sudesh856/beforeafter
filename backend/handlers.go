@@ -1,7 +1,9 @@
 package main
 
 import (
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"log"
 	"math/rand"
@@ -28,6 +30,10 @@ func createProof(w http.ResponseWriter, r *http.Request) {
 
 	log.Printf("✅ Decoded proof ID: %s", payload.Proof.ProofID)
 	log.Printf("✅ Worker ID: %s", payload.Proof.WorkerID)
+	// Log key ID if present
+	if payload.Proof.KeyID != "" {
+		log.Printf("🔑 Key ID: %s", payload.Proof.KeyID)
+	}
 	log.Printf("✅ Signature length: %d", len(payload.Signature))
 
 	proofJSON, err := json.Marshal(payload.Proof)
@@ -39,8 +45,9 @@ func createProof(w http.ResponseWriter, r *http.Request) {
 
 	log.Printf("✅ Proof JSON length: %d bytes", len(proofJSON))
 
-	_, err = db.Exec("INSERT INTO proofs (proof_id, worker_id, data, signature) VALUES (?, ?, ?, ?)",
-		payload.Proof.ProofID, payload.Proof.WorkerID, string(proofJSON), payload.Signature)
+	// Insert with key_id (might be empty string for old clients, which is fine)
+	_, err = db.Exec("INSERT INTO proofs (proof_id, worker_id, data, signature, key_id) VALUES (?, ?, ?, ?, ?)",
+		payload.Proof.ProofID, payload.Proof.WorkerID, string(proofJSON), payload.Signature, payload.Proof.KeyID)
 
 	if err != nil {
 		log.Printf("❌ Database insert error: %v", err)
@@ -108,6 +115,12 @@ func verifyPin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if err != nil {
+		log.Printf("❌ Failed to fetch PIN: %v", err)
+		http.Error(w, "Failed to verify PIN", http.StatusInternalServerError)
+		return
+	}
+
 	expiresAt, err := time.Parse(time.RFC3339, expiresAtStr)
 	if err != nil {
 		log.Printf("❌ Failed to parse expiration time: %v", err)
@@ -126,8 +139,11 @@ func verifyPin(w http.ResponseWriter, r *http.Request) {
 
 	log.Printf("✅ PIN is valid and not expired")
 
+	// Helper to handle NULL key_id from DB
 	var proofData, signature, workerID string
-	err = db.QueryRow("SELECT data, signature, worker_id FROM proofs WHERE proof_id = ?", proofID).Scan(&proofData, &signature, &workerID)
+	var keyID sql.NullString
+
+	err = db.QueryRow("SELECT data, signature, worker_id, key_id FROM proofs WHERE proof_id = ?", proofID).Scan(&proofData, &signature, &workerID, &keyID)
 	if err != nil {
 		log.Printf("❌ Failed to fetch proof data: %v", err)
 		http.Error(w, "Proof not found", http.StatusNotFound)
@@ -137,10 +153,34 @@ func verifyPin(w http.ResponseWriter, r *http.Request) {
 	log.Printf("✅ Proof data retrieved for worker: %s", workerID)
 
 	var publicKey string
-	err = db.QueryRow("SELECT public_key FROM worker_keys WHERE worker_id = ?", workerID).Scan(&publicKey)
+	var revokedAt sql.NullTime
+
+	if keyID.Valid && keyID.String != "" {
+		// Versioned lookup
+		log.Printf("🔑 Looking up specific key ID: %s", keyID.String)
+		err = db.QueryRow("SELECT public_key, revoked_at FROM worker_keys WHERE key_id = ?", keyID.String).Scan(&publicKey, &revokedAt)
+		if err == sql.ErrNoRows {
+			// Fallback: try to find by worker_id? No, if key_id is specified it MUST match.
+			log.Printf("❌ Key ID %s not found", keyID.String)
+			http.Error(w, "Signing key not found", http.StatusNotFound)
+			return
+		}
+	} else {
+		// Legacy lookup: get latest active key for worker
+		// Note: This might fail legacy proof verification if the key was rotated.
+		// But per spec "If key_id absent -> fall back to latest active key".
+		log.Printf("⚠️ No key ID in proof, falling back to latest active key for worker: %s", workerID)
+		err = db.QueryRow("SELECT public_key, revoked_at FROM worker_keys WHERE worker_id = ? ORDER BY created_at DESC LIMIT 1", workerID).Scan(&publicKey, &revokedAt)
+		if err == sql.ErrNoRows {
+			log.Printf("❌ No keys found for worker %s", workerID)
+			http.Error(w, "Worker public key not found", http.StatusNotFound)
+			return
+		}
+	}
+
 	if err != nil {
-		log.Printf("❌ Failed to fetch public key for worker %s: %v", workerID, err)
-		http.Error(w, "Worker public key not found", http.StatusNotFound)
+		log.Printf("❌ Database error fetching key: %v", err)
+		http.Error(w, "Database error", http.StatusInternalServerError)
 		return
 	}
 
@@ -156,6 +196,7 @@ func verifyPin(w http.ResponseWriter, r *http.Request) {
 		"proof":           proof,
 		"signature":       signature,
 		"workerPublicKey": publicKey,
+		"keyRotated":      revokedAt.Valid, // true if key has been revoked (rotated)
 	}
 
 	log.Printf("📤 Sending response to client")
@@ -180,47 +221,59 @@ func registerPublicKey(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	log.Printf("✅ Public key length: %d", len(payload.PublicKey))
+	// Compute Key ID (SHA-256 of public key)
+	// We assume public Key IS the base64 string.
+	// We want key_id to be deterministic.
+	hash := sha256.Sum256([]byte(payload.PublicKey))
+	keyID := hex.EncodeToString(hash[:])
 
-	var existingKey string
-	err = db.QueryRow("SELECT public_key FROM worker_keys WHERE worker_id = ?", workerID).Scan(&existingKey)
+	log.Printf("🔑 Key ID computed: %s", keyID)
 
-	if err == sql.ErrNoRows {
-		// First time registration
-		log.Printf("🔑 First time registration for worker: %s", workerID)
+	// Check if THIS specific key exists (idempotency)
+	var existingKeyID string
+	err = db.QueryRow("SELECT key_id FROM worker_keys WHERE key_id = ?", keyID).Scan(&existingKeyID)
 
-		_, err = db.Exec("INSERT INTO worker_keys (worker_id, public_key, created_at) VALUES (?, ?, ?)",
-			workerID, payload.PublicKey, time.Now())
-
-		if err != nil {
-			log.Printf("❌ Failed to insert public key: %v", err)
-			http.Error(w, "Failed to store public key", http.StatusInternalServerError)
-			return
-		}
-
-		log.Printf("✅ Public key registered successfully")
-		w.WriteHeader(http.StatusCreated)
-		json.NewEncoder(w).Encode(map[string]string{"status": "registered"})
-	} else if existingKey != payload.PublicKey {
-		// Key changed (app reinstalled, new device, etc.)
-		log.Printf("⚠️  Public key changed for worker: %s - updating", workerID)
-
-		_, err = db.Exec("UPDATE worker_keys SET public_key = ?, created_at = ? WHERE worker_id = ?",
-			payload.PublicKey, time.Now(), workerID)
-
-		if err != nil {
-			log.Printf("❌ Failed to update public key: %v", err)
-			http.Error(w, "Failed to update public key", http.StatusInternalServerError)
-			return
-		}
-
-		log.Printf("✅ Public key updated successfully")
+	if err == nil {
+		// Key exists
+		log.Printf("ℹ️  Key %s already registered", keyID)
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(map[string]string{"status": "updated"})
-	} else {
-		// Same key already exists
-		log.Printf("ℹ️  Public key already exists for worker: %s", workerID)
-		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(map[string]string{"status": "already_registered"})
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"status": "already_registered",
+			"keyId":  keyID,
+		})
+		return
+	} else if err != sql.ErrNoRows {
+		log.Printf("❌ Database error: %v", err)
+		http.Error(w, "Database error", http.StatusInternalServerError)
+		return
 	}
+
+	// Key does not exist. This is a NEW key.
+	// 1. Revoke old keys for this worker
+	log.Printf("🔄 Revoking old keys for worker: %s", workerID)
+	_, err = db.Exec("UPDATE worker_keys SET revoked_at = ? WHERE worker_id = ? AND revoked_at IS NULL",
+		time.Now(), workerID)
+
+	if err != nil {
+		log.Printf("❌ Failed to revoke old keys: %v", err)
+		// Continue anyway? Best effort.
+	}
+
+	// 2. Insert new key
+	log.Printf("📝 Inserting new key: %s", keyID)
+	_, err = db.Exec("INSERT INTO worker_keys (key_id, worker_id, public_key, created_at) VALUES (?, ?, ?, ?)",
+		keyID, workerID, payload.PublicKey, time.Now())
+
+	if err != nil {
+		log.Printf("❌ Failed to insert public key: %v", err)
+		http.Error(w, "Failed to store public key", http.StatusInternalServerError)
+		return
+	}
+
+	log.Printf("✅ Public key registered successfully")
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status": "registered",
+		"keyId":  keyID,
+	})
 }
