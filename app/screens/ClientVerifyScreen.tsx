@@ -1,26 +1,24 @@
 import { RATE_LIMIT_ATTEMPTS, RATE_LIMIT_LOCKOUT_MS } from '@/app/config/api';
 import {
-  canonicalizeProof,
-  ProofObject,
-  validateProof,
-  verifyProofSignature,
+    ProofObject,
+    validateProof,
+    verifyProofSignature
 } from '@/app/utils/crypto';
 import { fetchProofByPin } from '@/app/utils/proofUpload';
 import * as Clipboard from 'expo-clipboard';
 import { useRouter } from 'expo-router';
-import { sha256 } from 'js-sha256';
 import React, { useEffect, useState } from 'react';
 import {
-  ActivityIndicator,
-  AppState,
-  AppStateStatus,
-  SafeAreaView,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
+    ActivityIndicator,
+    AppState,
+    AppStateStatus,
+    SafeAreaView,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View,
 } from 'react-native';
 
 interface ClientState {
@@ -108,47 +106,6 @@ export default function ClientVerifyScreen() {
    * 4. Display read-only proof if valid
    * 5. Big red error if signature fails
    */
-  /**
-   * Reconstruct the proof object strictly from the received data
-   * strictly adhering to the ProofObject interface and canonical types.
-   * This ensures we only verify and render exactly what was signed.
-   */
-  const reconstructCanonicalProof = (raw: any): ProofObject => {
-    return {
-      proofId: String(raw.proofId || ''),
-      status: String(raw.status || ''),
-      workerId: String(raw.workerId || ''),
-      createdAt: String(raw.createdAt || ''),
-      before: {
-        timestamp: String(raw.before?.timestamp || ''),
-        imageHash: String(raw.before?.imageHash || ''),
-        gps: {
-          lat: Number(raw.before?.gps?.lat || 0),
-          lon: Number(raw.before?.gps?.lon || 0),
-        },
-      },
-      after: {
-        timestamp: String(raw.after?.timestamp || ''),
-        imageHash: String(raw.after?.imageHash || ''),
-        gps: {
-          lat: Number(raw.after?.gps?.lat || 0),
-          lon: Number(raw.after?.gps?.lon || 0),
-        },
-      },
-    };
-  };
-
-  /**
-   * Verify PIN and signature
-   * 
-   * Security flow:
-   * 1. Rate limit check
-   * 2. Fetch proof + signature + public key from backend
-   * 3. Reconstruct canonical proof object (sanitize inputs)
-   * 4. Verify signature against THIS reconstructed object
-   * 5. Display THIS reconstructed object if valid
-   * 6. Big red error if signature fails
-   */
   const verifyProof = async () => {
     // Rate limit check (Section 5.10)
     if (state.lockoutUntil && Date.now() < state.lockoutUntil) {
@@ -186,16 +143,17 @@ export default function ClientVerifyScreen() {
         throw new Error('Invalid proof data received from backend');
       }
 
-      // Step 3: Reconstruct Canonical Proof (CRITICAL SECURITY FIX)
-      // We must verify and render the EXACT same data structure
-      const canonicalProof = reconstructCanonicalProof(data.proof);
-      console.log('🛡️ Reconstructed canonical proof for verification');
+      // Use the raw proof object directly.
+      // We've validated it, and since the backend now sends raw JSON bytes,
+      // this object should be bit-for-bit identical to what the worker signed.
+      const canonicalProof = data.proof as ProofObject;
+      console.log('🛡️ Using raw proof for verification');
 
       // Step 4: Verify signature CLIENT-SIDE (CRITICAL)
       // This is the absolute gatekeeper for rendering
       console.log('🔒 Verifying signature client-side...');
       const isSignatureValid = await verifyProofSignature(
-        canonicalProof, // Verify the CLEAN object
+        canonicalProof,
         data.signature,
         data.workerPublicKey
       );
@@ -210,13 +168,13 @@ export default function ClientVerifyScreen() {
 
       // Freeze proof objects for immutability (Section 4.4)
       Object.freeze(canonicalProof);
-      Object.freeze(canonicalProof.before);
-      Object.freeze(canonicalProof.after);
+      if (canonicalProof.before) Object.freeze(canonicalProof.before);
+      if (canonicalProof.after) Object.freeze(canonicalProof.after);
 
       // Success - display proof
       setState(prev => ({
         ...prev,
-        proof: canonicalProof, // Render the CLEAN object
+        proof: canonicalProof,
         isVerified: true,
         keyRotated: !!data.keyRotated, // Extract key rotation flag
         attempts: newAttempts,
@@ -358,7 +316,7 @@ export default function ClientVerifyScreen() {
             <View style={styles.section}>
               <Text style={styles.label}>Proof Hash</Text>
               <Text style={[styles.value, styles.hash]}>
-                {sha256(canonicalizeProof(state.proof))}
+                {state.proof.proofHash || 'N/A'}
               </Text>
             </View>
 
@@ -549,8 +507,8 @@ const styles = StyleSheet.create({
   },
   pasteButtonText: {
     fontSize: 14,
+    color: '#333',
     fontWeight: '600',
-    color: '#0066cc',
   },
 
   // Error

@@ -8,13 +8,13 @@ import { validateRadius } from '@/lib/radiusEnforcement';
 import { generateWorkerKeypair, getDeviceWorkerId, ProofObject } from '@/app/utils/crypto';
 import { generatePin, uploadProof } from '@/app/utils/proofUpload';
 import {
-  detectClockAnomaly,
-  getElapsedMonotonicMs,
-  getTimeSource,
-  initializeTimeTracking,
-  recordTimeAnomaly,
-  resetTimeTracking,
-  validateTimeWindow
+    detectClockAnomaly,
+    getElapsedMonotonicMs,
+    getTimeSource,
+    initializeTimeTracking,
+    recordTimeAnomaly,
+    resetTimeTracking,
+    validateTimeWindow
 } from '@/lib/timeWindowEnforcement';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
@@ -30,21 +30,21 @@ import { useFocusEffect } from 'expo-router';
 import * as Sharing from 'expo-sharing';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  ActivityIndicator,
-  Alert,
-  AppState,
-  AppStateStatus,
-  InteractionManager,
-  Modal,
-  Platform,
-  SafeAreaView,
-  ScrollView,
-  Share,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View
+    ActivityIndicator,
+    Alert,
+    AppState,
+    AppStateStatus,
+    InteractionManager,
+    Modal,
+    Platform,
+    SafeAreaView,
+    ScrollView,
+    Share,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View
 } from 'react-native';
 
 
@@ -549,6 +549,7 @@ export default function HomeScreen() {
       proofId: proof.id,
       status: 'completed',
       workerId: workerId,
+      proofHash: proof.proofHash,
       createdAt: proof.createdAt,
       before: {
         timestamp: proof.beforeTimestamp || proof.createdAt,
@@ -556,6 +557,7 @@ export default function HomeScreen() {
         gps: {
           lat: proof.beforeLocation?.latitude || 0,
           lon: proof.beforeLocation?.longitude || 0,
+          accuracy: proof.beforeLocation?.accuracy || 0,
         },
       },
       after: {
@@ -564,8 +566,13 @@ export default function HomeScreen() {
         gps: {
           lat: proof.afterLocation?.latitude || 0,
           lon: proof.afterLocation?.longitude || 0,
+          accuracy: proof.afterLocation?.accuracy || 0,
         },
       },
+      // Include device, platform, timeWindow for proofHash computation (CRITICAL for matching client hash)
+      device: proof.deviceName,
+      platform: proof.platform,
+      timeWindow: proof.timeWindow || undefined,
     };
   };
 

@@ -26,6 +26,7 @@ export interface ProofObject {
   proofId: string;
   status: string;
   workerId: string;
+  proofHash?: string;  // Add for hash verification
   createdAt: string;
   before: {
     timestamp: string;
@@ -42,6 +43,15 @@ export interface ProofObject {
       lat: number;
       lon: number;
     };
+  };
+  // Optional fields needed for proofHash computation
+  device?: string;
+  platform?: string;
+  timeWindow?: {
+    minTimeMs: number;
+    maxTimeMs: number;
+    actualElapsedMs: number;
+    timeSource: string;
   };
   [key: string]: any;
 }
@@ -130,22 +140,30 @@ export const canonicalizeProof = (proof: any): string => {
   const beforeLat = proof.before?.gps?.lat ? Number(Number(proof.before.gps.lat).toFixed(7)) : 0;
   const beforeLon = proof.before?.gps?.lon ? Number(Number(proof.before.gps.lon).toFixed(7)) : 0;
 
-  // Force strings for hashes and timestamps
-  const afterHash = String(proof.after?.imageHash || '');
+  /* 
+   * Force strings for hashes and timestamps
+   * Added .trim() to remove accidental whitespace which causes verification failures
+   */
+  const afterHash = String(proof.after?.imageHash || '').trim();
+
   // Normalize timestamps to remove trailing zeros from milliseconds
   const normalizeTimestamp = (ts: string): string => {
     if (!ts) return '';
-    // Remove trailing zeros: "2026-02-15T07:00:21.520Z" → "2026-02-15T07:00:21.52Z"
-    return ts.replace(/(\.\d*?)0+Z$/, '$1Z');
+    let normalized = ts.trim();
+    // 1. Remove trailing zeros from fractional seconds: "2026...21.520Z" → "2026...21.52Z"
+    normalized = normalized.replace(/(\.\d*?)0+Z$/, '$1Z');
+    // 2. If that left a trailing dot (because all ms were 0), remove it: "2026...00.Z" → "2026...00Z"
+    normalized = normalized.replace(/\.Z$/, 'Z');
+    return normalized;
   };
 
   const afterTime = normalizeTimestamp(String(proof.after?.timestamp || ''));
-  const beforeHash = String(proof.before?.imageHash || '');
+  const beforeHash = String(proof.before?.imageHash || '').trim();
   const beforeTime = normalizeTimestamp(String(proof.before?.timestamp || ''));
   const createdAt = normalizeTimestamp(String(proof.createdAt || ''));
-  const proofId = String(proof.proofId || '');
-  const status = String(proof.status || '');
-  const workerId = String(proof.workerId || '');
+  const proofId = String(proof.proofId || '').trim();
+  const status = String(proof.status || '').trim();
+  const workerId = String(proof.workerId || '').trim();
 
   // Build canonical string manually (NO JSON.stringify variations)
   const canonical =
@@ -160,7 +178,9 @@ export const canonicalizeProof = (proof: any): string => {
     '"status":"' + status + '",' +
     '"workerId":"' + workerId + '"}';
 
-
+  // Debug logs removed per user request
+  // console.log('🔍 Canonical String:', canonical);
+  // console.log('#️⃣ Canonical Hash:', sha256(canonical));
 
   return canonical;
 };
@@ -168,10 +188,34 @@ export const canonicalizeProof = (proof: any): string => {
 
 export const signProof = async (proof: ProofObject): Promise<string> => {
   try {
-    console.log('✍️ Signing proof...');
-    const canonicalJSON = canonicalizeProof(proof);
+    // console.log('✍️ Signing proof...');
+    // Compute proofHash the SAME WAY the client does (from createProofHash in index.tsx/[id].tsx)
+    // MUST match client computation exactly: beforeHash, afterHash, timestamp, locations, device, platform, timeWindow
+    const proofHashInput = JSON.stringify({
+      beforeHash: proof.before?.imageHash || '',
+      afterHash: proof.after?.imageHash || '',
+      timestamp: proof.before?.timestamp || '',
+      beforeLocation: {
+        latitude: proof.before?.gps?.lat || 0,
+        longitude: proof.before?.gps?.lon || 0,
+        accuracy: (proof.before?.gps as any)?.accuracy || 0
+      },
+      afterLocation: {
+        latitude: proof.after?.gps?.lat || 0,
+        longitude: proof.after?.gps?.lon || 0,
+        accuracy: (proof.after?.gps as any)?.accuracy || 0
+      },
+      device: proof.device || '',
+      platform: proof.platform || '',
+      timeWindow: proof.timeWindow ? {
+        minTimeMs: proof.timeWindow.minTimeMs,
+        maxTimeMs: proof.timeWindow.maxTimeMs,
+        actualElapsedMs: proof.timeWindow.actualElapsedMs,
+        timeSource: proof.timeWindow.timeSource,
+      } : null,
+    });
 
-    const proofHash = sha256(canonicalJSON);
+    const proofHash = sha256(proofHashInput);
 
     const privateKeyB64 = await SecureStore.getItemAsync('workerPrivateKey');
     if (!privateKeyB64) {
@@ -186,7 +230,7 @@ export const signProof = async (proof: ProofObject): Promise<string> => {
     );
 
     const signatureB64 = encodeBase64(signatureBytes);
-    console.log('✓ Proof signed successfully');
+    // console.log('✓ Proof signed successfully');
     return signatureB64;
   } catch (error) {
     console.error('❌ Error signing proof:', error);
@@ -199,10 +243,9 @@ export const signProof = async (proof: ProofObject): Promise<string> => {
  * This is the critical security operation that ensures proof integrity
  * 
  * Process:
- * 1. Canonicalize the proof the same way worker did
- * 2. Hash with SHA256
- * 3. Verify signature against proof hash using worker's public key
- * 4. Return boolean verification result
+ * 1. Compute proofHash the SAME WAY signProof does
+ * 2. Verify signature against proof hash using worker's public key
+ * 3. Return boolean verification result
  */
 export const verifyProofSignature = async (
   proof: ProofObject,
@@ -210,10 +253,33 @@ export const verifyProofSignature = async (
   publicKeyBase64: string
 ): Promise<boolean> => {
   try {
-    console.log('� Verifying signature client-side...');
-    const canonicalJSON = canonicalizeProof(proof);
+    // console.log('🔒 Verifying signature client-side...');
+    // Compute proofHash the SAME WAY signProof does for consistency
+    const proofHashInput = JSON.stringify({
+      beforeHash: proof.before?.imageHash || '',
+      afterHash: proof.after?.imageHash || '',
+      timestamp: proof.before?.timestamp || '',
+      beforeLocation: {
+        latitude: proof.before?.gps?.lat || 0,
+        longitude: proof.before?.gps?.lon || 0,
+        accuracy: (proof.before?.gps as any)?.accuracy || 0
+      },
+      afterLocation: {
+        latitude: proof.after?.gps?.lat || 0,
+        longitude: proof.after?.gps?.lon || 0,
+        accuracy: (proof.after?.gps as any)?.accuracy || 0
+      },
+      device: proof.device || '',
+      platform: proof.platform || '',
+      timeWindow: proof.timeWindow ? {
+        minTimeMs: proof.timeWindow.minTimeMs,
+        maxTimeMs: proof.timeWindow.maxTimeMs,
+        actualElapsedMs: proof.timeWindow.actualElapsedMs,
+        timeSource: proof.timeWindow.timeSource,
+      } : null,
+    });
 
-    const proofHash = sha256(canonicalJSON);
+    const proofHash = sha256(proofHashInput);
 
     const signature = decodeBase64(signatureBase64);
     const publicKey = decodeBase64(publicKeyBase64);
@@ -225,7 +291,7 @@ export const verifyProofSignature = async (
     );
 
     if (isValid) {
-      console.log('✅ Signature verification PASSED');
+      // console.log('✅ Signature verification PASSED');
     } else {
       console.log('❌ Signature verification FAILED');
     }

@@ -17,8 +17,8 @@ func createProof(w http.ResponseWriter, r *http.Request) {
 	log.Println("📥 Received POST /proofs request")
 
 	var payload struct {
-		Proof     Proof  `json:"proof"`
-		Signature string `json:"signature"`
+		Proof     json.RawMessage `json:"proof"`
+		Signature string          `json:"signature"`
 	}
 
 	err := json.NewDecoder(r.Body).Decode(&payload)
@@ -28,26 +28,34 @@ func createProof(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	log.Printf("✅ Decoded proof ID: %s", payload.Proof.ProofID)
-	log.Printf("✅ Worker ID: %s", payload.Proof.WorkerID)
+	// Parse metadata for DB columns, but use payload.Proof (RawMessage) for 'data' storage
+	// This ensures we store exactly what was signed, without Go re-marshaling (which changes timestamps/floats)
+	var meta struct {
+		ProofID  string `json:"proofId"`
+		WorkerID string `json:"workerId"`
+		KeyID    string `json:"keyId"`
+	}
+	if err := json.Unmarshal(payload.Proof, &meta); err != nil {
+		log.Printf("❌ JSON decode metadata error: %v", err)
+		http.Error(w, "Invalid Proof structure", http.StatusBadRequest)
+		return
+	}
+
+	log.Printf("✅ Decoded proof ID: %s", meta.ProofID)
+	log.Printf("✅ Worker ID: %s", meta.WorkerID)
 	// Log key ID if present
-	if payload.Proof.KeyID != "" {
-		log.Printf("🔑 Key ID: %s", payload.Proof.KeyID)
+	if meta.KeyID != "" {
+		log.Printf("🔑 Key ID: %s", meta.KeyID)
 	}
 	log.Printf("✅ Signature length: %d", len(payload.Signature))
 
-	proofJSON, err := json.Marshal(payload.Proof)
-	if err != nil {
-		log.Printf("❌ JSON marshal error: %v", err)
-		http.Error(w, "Failed to marshal proof", http.StatusInternalServerError)
-		return
-	}
+	proofJSON := string(payload.Proof)
 
 	log.Printf("✅ Proof JSON length: %d bytes", len(proofJSON))
 
 	// Insert with key_id (might be empty string for old clients, which is fine)
 	_, err = db.Exec("INSERT INTO proofs (proof_id, worker_id, data, signature, key_id) VALUES (?, ?, ?, ?, ?)",
-		payload.Proof.ProofID, payload.Proof.WorkerID, string(proofJSON), payload.Signature, payload.Proof.KeyID)
+		meta.ProofID, meta.WorkerID, proofJSON, payload.Signature, meta.KeyID)
 
 	if err != nil {
 		log.Printf("❌ Database insert error: %v", err)
@@ -55,7 +63,7 @@ func createProof(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	log.Printf("✅ Proof %s stored successfully", payload.Proof.ProofID)
+	log.Printf("✅ Proof %s stored successfully", meta.ProofID)
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(map[string]string{"status": "success"})
 }
@@ -186,14 +194,14 @@ func verifyPin(w http.ResponseWriter, r *http.Request) {
 
 	log.Printf("✅ Public key retrieved")
 
-	var proof Proof
-	json.Unmarshal([]byte(proofData), &proof)
+	
+	rawProof := json.RawMessage([]byte(proofData))
 
 	db.Exec("DELETE FROM pins WHERE pin = ?", pin)
 	log.Printf("✅ PIN deleted after successful verification")
 
 	response := map[string]interface{}{
-		"proof":           proof,
+		"proof":           rawProof, // embeds raw JSON bytes directly
 		"signature":       signature,
 		"workerPublicKey": publicKey,
 		"keyRotated":      revokedAt.Valid, // true if key has been revoked (rotated)

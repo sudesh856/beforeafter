@@ -48,19 +48,39 @@ func initDB() {
 		log.Fatal(err)
 	}
 
-	// Add key_id to proofs table if it doesn't exist
-	_, err = db.Exec(`ALTER TABLE proofs ADD COLUMN key_id TEXT`)
-	if err != nil {
-		// Ignore check - likely already exists or failed because of duplicate column
-		// In a production migration we'd check PRAGMA table_info first, but for this:
-		log.Println("ℹ️  (Migration) proofs.key_id column likely exists:", err)
+	
+	rows, err := db.Query("PRAGMA table_info(proofs)")
+	proofsHasKeyID := false
+	if err == nil && rows != nil {
+		for rows.Next() {
+			var cid int
+			var name, ctype string
+			var notnull, pk int
+			var dflt interface{}
+			rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk)
+			if name == "key_id" {
+				proofsHasKeyID = true
+				break
+			}
+		}
+		rows.Close()
+	}
+
+	// Only add the column if it doesn't exist
+	if !proofsHasKeyID {
+		_, err = db.Exec(`ALTER TABLE proofs ADD COLUMN key_id TEXT`)
+		if err != nil {
+			log.Println("⚠️  (Migration) Error adding key_id to proofs:", err)
+		} else {
+			log.Println("✅ (Migration) Added key_id column to proofs table")
+		}
 	}
 
 	// Check if worker_keys needs migration
 	// Old schema: worker_id (PK), public_key, created_at
 	// New schema: key_id (PK), worker_id, public_key, revoked_at, created_at
 
-	rows, err := db.Query("PRAGMA table_info(worker_keys)")
+	rows, err = db.Query("PRAGMA table_info(worker_keys)")
 	hasKeyID := false
 	if err == nil && rows != nil {
 		for rows.Next() {
