@@ -123,55 +123,56 @@ export const generateWorkerKeypair = async (): Promise<void> => {
  * 3. No extra whitespace
  * 4. Deterministic nested object ordering
  */
-export const canonicalizeProof = (proof: any) => {
-  // Ensure all values are strings/numbers, no undefined
-  const canonical = {
-    after: {
-      gps: {
-        lat: proof.after?.gps?.lat ?? 0,
-        lon: proof.after?.gps?.lon ?? 0
-      },
-      imageHash: proof.after?.imageHash ?? '',
-      timestamp: proof.after?.timestamp ?? ''
-    },
-    before: {
-      gps: {
-        lat: proof.before?.gps?.lat ?? 0,
-        lon: proof.before?.gps?.lon ?? 0
-      },
-      imageHash: proof.before?.imageHash ?? '',
-      timestamp: proof.before?.timestamp ?? ''
-    },
-    createdAt: proof.createdAt ?? '',
-    proofId: proof.proofId ?? '',
-    status: proof.status ?? '',
-    workerId: proof.workerId ?? ''
+export const canonicalizeProof = (proof: any): string => {
+  // Force EXACT precision for GPS coordinates (7 decimal places)
+  const afterLat = proof.after?.gps?.lat ? Number(Number(proof.after.gps.lat).toFixed(7)) : 0;
+  const afterLon = proof.after?.gps?.lon ? Number(Number(proof.after.gps.lon).toFixed(7)) : 0;
+  const beforeLat = proof.before?.gps?.lat ? Number(Number(proof.before.gps.lat).toFixed(7)) : 0;
+  const beforeLon = proof.before?.gps?.lon ? Number(Number(proof.before.gps.lon).toFixed(7)) : 0;
+
+  // Force strings for hashes and timestamps
+  const afterHash = String(proof.after?.imageHash || '');
+  // Normalize timestamps to remove trailing zeros from milliseconds
+  const normalizeTimestamp = (ts: string): string => {
+    if (!ts) return '';
+    // Remove trailing zeros: "2026-02-15T07:00:21.520Z" → "2026-02-15T07:00:21.52Z"
+    return ts.replace(/(\.\d*?)0+Z$/, '$1Z');
   };
 
-  // Stringify with no whitespace, keys already in deterministic order
-  return JSON.stringify(canonical);
+  const afterTime = normalizeTimestamp(String(proof.after?.timestamp || ''));
+  const beforeHash = String(proof.before?.imageHash || '');
+  const beforeTime = normalizeTimestamp(String(proof.before?.timestamp || ''));
+  const createdAt = normalizeTimestamp(String(proof.createdAt || ''));
+  const proofId = String(proof.proofId || '');
+  const status = String(proof.status || '');
+  const workerId = String(proof.workerId || '');
+
+  // Build canonical string manually (NO JSON.stringify variations)
+  const canonical =
+    '{"after":{"gps":{"lat":' + afterLat + ',"lon":' + afterLon + '},' +
+    '"imageHash":"' + afterHash + '",' +
+    '"timestamp":"' + afterTime + '"},' +
+    '"before":{"gps":{"lat":' + beforeLat + ',"lon":' + beforeLon + '},' +
+    '"imageHash":"' + beforeHash + '",' +
+    '"timestamp":"' + beforeTime + '"},' +
+    '"createdAt":"' + createdAt + '",' +
+    '"proofId":"' + proofId + '",' +
+    '"status":"' + status + '",' +
+    '"workerId":"' + workerId + '"}';
+
+
+
+  return canonical;
 };
 
-/**
- * Sign a proof with worker's private key
- * Returns Base64-encoded signature
- * 
- * Process:
- * 1. Canonicalize proof to deterministic JSON
- * 2. Hash with SHA256
- * 3. Sign hash with private key (detached signature)
- * 4. Return Base64 for transmission
- */
+
 export const signProof = async (proof: ProofObject): Promise<string> => {
   try {
+    console.log('✍️ Signing proof...');
     const canonicalJSON = canonicalizeProof(proof);
-    console.log('📝 Canonical proof:', canonicalJSON);
 
-    // Hash the canonical JSON
     const proofHash = sha256(canonicalJSON);
-    console.log('🔑 Proof hash:', proofHash);
 
-    // Get private key from secure storage
     const privateKeyB64 = await SecureStore.getItemAsync('workerPrivateKey');
     if (!privateKeyB64) {
       throw new Error('Worker private key not found. Generate keypair first.');
@@ -179,7 +180,6 @@ export const signProof = async (proof: ProofObject): Promise<string> => {
 
     const privateKey = decodeBase64(privateKeyB64);
 
-    // Create detached signature
     const signatureBytes = nacl.sign.detached(
       hexToUint8Array(proofHash),
       privateKey
@@ -210,18 +210,14 @@ export const verifyProofSignature = async (
   publicKeyBase64: string
 ): Promise<boolean> => {
   try {
+    console.log('� Verifying signature client-side...');
     const canonicalJSON = canonicalizeProof(proof);
-    console.log('📝 Canonical proof (verify):', canonicalJSON);
 
-    // Hash the canonical JSON (must match worker's hash)
     const proofHash = sha256(canonicalJSON);
-    console.log('🔑 Proof hash (verify):', proofHash);
 
-    // Decode signature and public key from Base64
     const signature = decodeBase64(signatureBase64);
     const publicKey = decodeBase64(publicKeyBase64);
 
-    // Verify detached signature
     const isValid = nacl.sign.detached.verify(
       hexToUint8Array(proofHash),
       signature,
@@ -241,10 +237,7 @@ export const verifyProofSignature = async (
   }
 };
 
-/**
- * Get worker's public key from secure storage
- * Used for uploading to backend
- */
+
 export const getWorkerPublicKey = async (): Promise<string> => {
   try {
     const publicKey = await SecureStore.getItemAsync('workerPublicKey');

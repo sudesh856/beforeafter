@@ -186,6 +186,7 @@ func registerPublicKey(w http.ResponseWriter, r *http.Request) {
 	err = db.QueryRow("SELECT public_key FROM worker_keys WHERE worker_id = ?", workerID).Scan(&existingKey)
 
 	if err == sql.ErrNoRows {
+		// First time registration
 		log.Printf("🔑 First time registration for worker: %s", workerID)
 
 		_, err = db.Exec("INSERT INTO worker_keys (worker_id, public_key, created_at) VALUES (?, ?, ?)",
@@ -200,7 +201,24 @@ func registerPublicKey(w http.ResponseWriter, r *http.Request) {
 		log.Printf("✅ Public key registered successfully")
 		w.WriteHeader(http.StatusCreated)
 		json.NewEncoder(w).Encode(map[string]string{"status": "registered"})
+	} else if existingKey != payload.PublicKey {
+		// Key changed (app reinstalled, new device, etc.)
+		log.Printf("⚠️  Public key changed for worker: %s - updating", workerID)
+
+		_, err = db.Exec("UPDATE worker_keys SET public_key = ?, created_at = ? WHERE worker_id = ?",
+			payload.PublicKey, time.Now(), workerID)
+
+		if err != nil {
+			log.Printf("❌ Failed to update public key: %v", err)
+			http.Error(w, "Failed to update public key", http.StatusInternalServerError)
+			return
+		}
+
+		log.Printf("✅ Public key updated successfully")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]string{"status": "updated"})
 	} else {
+		// Same key already exists
 		log.Printf("ℹ️  Public key already exists for worker: %s", workerID)
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(map[string]string{"status": "already_registered"})
