@@ -99,6 +99,8 @@ This application eliminates these disputes through cryptographic proof that cann
 - **Language**: Go (Golang)
 - **Function**: Proof storage, code generation, API endpoints
 
+>  **Note:** The backend runs locally. You must either run it on your own machine and update `app/config/api.ts` with your IP address, or deploy it to your own server.
+
 ### Cryptography
 - **Digital Signatures**: Ed25519
 - **Hashing**: SHA-256
