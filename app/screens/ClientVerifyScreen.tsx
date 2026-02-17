@@ -5,6 +5,7 @@ import {
     verifyProofSignature
 } from '@/app/utils/crypto';
 import { fetchProofByPin } from '@/app/utils/proofUpload';
+import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as Clipboard from 'expo-clipboard';
 import { useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
@@ -43,6 +44,9 @@ export default function ClientVerifyScreen() {
     attempts: 0,
     lockoutUntil: null,
   });
+
+  const [permission, requestPermission] = useCameraPermissions();
+  const [isScannerOpen, setIsScannerOpen] = useState(false);
 
   const appState = React.useRef(AppState.currentState);
 
@@ -94,6 +98,47 @@ export default function ClientVerifyScreen() {
     } catch (error) {
       console.error('Error pasting PIN:', error);
     }
+  };
+
+  /**
+   * Handle scanned QR code - populate PIN and trigger verification
+   */
+  const handleBarcodeScanned = async (scannedData: any) => {
+    const scannedValue = scannedData.data;
+    
+    // Sanitize the scanned value (10 characters, uppercase)
+    const sanitized = (scannedValue || '').toUpperCase().trim().slice(0, 10);
+    
+    // Check if it's a valid 10-character code
+    if (sanitized.length === 10) {
+      // Close scanner immediately
+      setIsScannerOpen(false);
+      
+      // Update PIN state
+      setState(prev => ({ ...prev, pin: sanitized }));
+      
+      // Wait a brief moment for state to update, then verify
+      setTimeout(() => {
+        verifyProof();
+      }, 100);
+    }
+  };
+
+  /**
+   * Open camera scanner for QR code
+   */
+  const handleOpenScanner = async () => {
+    if (!permission?.granted) {
+      const { granted } = await requestPermission();
+      if (!granted) {
+        setState(prev => ({
+          ...prev,
+          error: 'Camera permission required to scan QR code',
+        }));
+        return;
+      }
+    }
+    setIsScannerOpen(true);
   };
 
   /**
@@ -378,6 +423,15 @@ export default function ClientVerifyScreen() {
             >
               <Text style={styles.pasteButtonText}>📋 Paste</Text>
             </TouchableOpacity>
+
+            {/* Scan QR Code Button */}
+            <TouchableOpacity
+              style={styles.scanButton}
+              onPress={handleOpenScanner}
+              disabled={state.loading || !!state.lockoutUntil}
+            >
+              <Text style={styles.scanButtonText}>📱 Scan QR Code</Text>
+            </TouchableOpacity>
           </View>
 
           {/* Error Message */}
@@ -427,6 +481,25 @@ export default function ClientVerifyScreen() {
           </View>
         </View>
       </ScrollView>
+
+      {/* QR Code Scanner */}
+      {isScannerOpen && (
+        <View style={styles.cameraContainer}>
+          <CameraView
+            style={styles.camera}
+            onBarcodeScanned={handleBarcodeScanned}
+            barcodeScannerSettings={{
+              barcodeTypes: ['qr'],
+            }}
+          />
+          <TouchableOpacity
+            style={styles.closeScannerButton}
+            onPress={() => setIsScannerOpen(false)}
+          >
+            <Text style={styles.closeScannerButtonText}>Close</Text>
+          </TouchableOpacity>
+        </View>
+      )}
     </SafeAreaView>
   );
 }
@@ -644,5 +717,40 @@ const styles = StyleSheet.create({
   hash: {
     fontFamily: 'monospace',
     fontSize: 12,
+  },
+  scanButton: {
+    backgroundColor: '#e3f2fd',
+    paddingVertical: 12,
+    borderRadius: 8,
+    alignItems: 'center',
+    marginTop: 8,
+    borderWidth: 1,
+    borderColor: '#2196F3',
+  },
+  scanButtonText: {
+    color: '#2196F3',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  cameraContainer: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: '#000',
+    justifyContent: 'flex-end',
+    alignItems: 'center',
+  },
+  camera: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  closeScannerButton: {
+    backgroundColor: '#2196F3',
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    borderRadius: 8,
+    marginBottom: 40,
+  },
+  closeScannerButtonText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
   },
 });
