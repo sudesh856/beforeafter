@@ -46,6 +46,7 @@ import {
     TouchableOpacity,
     View
 } from 'react-native';
+import QRCode from 'react-native-qrcode-svg';
 
 
 
@@ -114,6 +115,7 @@ export default function HomeScreen() {
   const [pinError, setPinError] = useState('');
   const [generatingCode, setGeneratingCode] = useState(false);
   const [isVerificationCodeLoading, setIsVerificationCodeLoading] = useState(false);
+  const [showQRCode, setShowQRCode] = useState(false);
 
   // USER-DECLARED TIME WINDOW ENFORCEMENT - State for time window UI and tracking
   const [showTimeWindowForm, setShowTimeWindowForm] = useState(false);
@@ -2150,7 +2152,10 @@ export default function HomeScreen() {
         visible={showPinModal}
         transparent={true}
         animationType="slide"
-        onRequestClose={() => setShowPinModal(false)}
+        onRequestClose={() => {
+          setShowPinModal(false);
+          setShowQRCode(false);
+        }}
       >
         <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)' }}>
           <ScrollView
@@ -2180,22 +2185,53 @@ export default function HomeScreen() {
                 </View>
               )}
 
-              {/* PIN Display Box */}
-              <View style={styles.pinContainer}>
-                <Text style={styles.pinLabel}>Verification PIN</Text>
-                {currentPin ? (
-                  <View style={styles.pinBox}>
-                    <Text style={styles.pinNumber}>{currentPin}</Text>
-                  </View>
-                ) : (
-                  <View style={styles.pinBox}>
-                    <ActivityIndicator size="large" color="#4CAF50" />
-                  </View>
-                )}
-                <Text style={styles.pinNote}>
-                  10-character code • Unique to this proof
-                </Text>
-              </View>
+              {/* PIN Display Box OR QR Code */}
+              {!showQRCode ? (
+                <View style={styles.pinContainer}>
+                  <Text style={styles.pinLabel}>Verification PIN</Text>
+                  {currentPin ? (
+                    <View style={styles.pinBox}>
+                      <Text style={styles.pinNumber}>{currentPin}</Text>
+                    </View>
+                  ) : (
+                    <View style={styles.pinBox}>
+                      <ActivityIndicator size="large" color="#4CAF50" />
+                    </View>
+                  )}
+                  <Text style={styles.pinNote}>
+                    10-character code • Unique to this proof
+                  </Text>
+                </View>
+              ) : (
+                <View style={styles.qrContainer}>
+                  <Text style={styles.qrLabel}>Verification QR Code</Text>
+                  {currentPin && (
+                    <View style={styles.qrBox}>
+                      <QRCode
+                        value={currentPin}
+                        size={200}
+                        backgroundColor="white"
+                        color="black"
+                      />
+                    </View>
+                  )}
+                  <Text style={styles.qrNote}>
+                    Scan with any QR reader
+                  </Text>
+                </View>
+              )}
+
+              {/* Toggle QR Code Button */}
+              {currentPin && (
+                <TouchableOpacity
+                  style={styles.toggleQRButton}
+                  onPress={() => setShowQRCode(!showQRCode)}
+                >
+                  <Text style={styles.toggleQRButtonText}>
+                    {showQRCode ? 'Use Code instead' : 'Use QR Code instead'}
+                  </Text>
+                </TouchableOpacity>
+              )}
 
               {/* Action Buttons */}
               {currentPin && (
@@ -2257,6 +2293,7 @@ export default function HomeScreen() {
                 style={[styles.doneButton, { marginTop: 10 }]}
                 onPress={() => {
                   setShowPinModal(false);
+                  setShowQRCode(false);
                   setCurrentPin('');
                   setCurrentProofId('');
                 }}
@@ -3320,6 +3357,49 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#3b82f6',
     marginTop: 12,
+    fontWeight: '600',
+  },
+  qrContainer: {
+    marginVertical: 20,
+    alignItems: 'center',
+  },
+  qrLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#999',
+    textTransform: 'uppercase',
+    marginBottom: 10,
+    letterSpacing: 1,
+  },
+  qrBox: {
+    backgroundColor: '#f5f5f5',
+    borderWidth: 2,
+    borderColor: '#4CAF50',
+    borderRadius: 12,
+    padding: 20,
+    marginBottom: 12,
+    width: '100%',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  qrNote: {
+    fontSize: 12,
+    color: '#999',
+    textAlign: 'center',
+  },
+  toggleQRButton: {
+    backgroundColor: '#f0f0f0',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    alignItems: 'center',
+    marginVertical: 12,
+    borderWidth: 1,
+    borderColor: '#ddd',
+  },
+  toggleQRButtonText: {
+    color: '#666',
+    fontSize: 13,
     fontWeight: '600',
   },
 });
