@@ -113,6 +113,7 @@ export default function HomeScreen() {
   const [currentProofId, setCurrentProofId] = useState('');
   const [pinError, setPinError] = useState('');
   const [generatingCode, setGeneratingCode] = useState(false);
+  const [isVerificationCodeLoading, setIsVerificationCodeLoading] = useState(false);
 
   // USER-DECLARED TIME WINDOW ENFORCEMENT - State for time window UI and tracking
   const [showTimeWindowForm, setShowTimeWindowForm] = useState(false);
@@ -1229,6 +1230,20 @@ export default function HomeScreen() {
     initializeApp();
   }, []);
 
+  // Manage verification code loading state: show when Proof Complete appears, hide when code arrives
+  useEffect(() => {
+    if (beforeTaken && afterTaken && metadata && !currentPin) {
+      setIsVerificationCodeLoading(true);
+    }
+  }, [beforeTaken, afterTaken, metadata]);
+
+  // Hide loading when verification code is received
+  useEffect(() => {
+    if (currentPin) {
+      setIsVerificationCodeLoading(false);
+    }
+  }, [currentPin]);
+
   // USER-DECLARED TIME WINDOW ENFORCEMENT - Monitor app lifecycle for anomalies
   useEffect(() => {
     const subscription = AppState.addEventListener('change', async (nextAppState: AppStateStatus) => {
@@ -2073,6 +2088,14 @@ export default function HomeScreen() {
             <Text style={styles.successTitle}>Proof Complete</Text>
             <Text style={styles.successText}>{metadata.timestamp}</Text>
             <Text style={styles.successText}>{metadata.device}</Text>
+          </View>
+        )}
+
+        {/* Verification Code Loading Overlay */}
+        {isVerificationCodeLoading && (
+          <View style={styles.loadingOverlayProof}>
+            <ActivityIndicator size="large" color="#3b82f6" />
+            <Text style={styles.loadingText}>Loading...</Text>
           </View>
         )}
 
@@ -3280,5 +3303,23 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#64748b',
     textAlign: 'center',
+  },
+  loadingOverlayProof: {
+    backgroundColor: 'rgba(255, 255, 255, 0.95)',
+    paddingVertical: 24,
+    paddingHorizontal: 16,
+    borderRadius: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginVertical: 16,
+    marginHorizontal: 20,
+    borderWidth: 1,
+    borderColor: 'rgba(59, 130, 246, 0.1)',
+  },
+  loadingText: {
+    fontSize: 16,
+    color: '#3b82f6',
+    marginTop: 12,
+    fontWeight: '600',
   },
 });
