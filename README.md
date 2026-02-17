@@ -46,6 +46,7 @@ This application eliminates these disputes through cryptographic proof that cann
 6. System generates proof (5-7 seconds processing)
 7. Receive unique 10-digit verification code
 8. Share code with client
+9. QR code scanner also added so as to just scan the QR and verify the work.
 
 **During Processing:**
 - Photo hashing (SHA-256)
