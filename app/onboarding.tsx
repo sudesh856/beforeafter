@@ -1,7 +1,7 @@
 import { BorderRadius, Colors, Spacing, Typography } from '@/constants/uiTheme';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { router } from 'expo-router';
-import { FileJson } from 'lucide-react-native';
+import { Check, FileJson, Lock } from 'lucide-react-native';
 import { useState } from 'react';
 import { ActivityIndicator, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
@@ -15,24 +15,19 @@ export default function OnboardingScreen() {
     setIsLoading(true);
 
     try {
-      // Set flag FIRST
       console.log('Saving onboarding state...');
       await AsyncStorage.setItem('hasOnboarded', 'true');
       console.log('Onboarding state saved');
 
-      // Small delay to ensure AsyncStorage completes
       await new Promise(resolve => setTimeout(resolve, 100));
       console.log('Delay complete');
 
-      // Then navigate (use replace, not navigate, for onboarding)
       console.log('Navigating to main app...');
-      // FIX: Go to HOME screen (Worker/Client selection), not straight to tabs
       router.replace('/home');
       console.log('Navigation called');
 
     } catch (error) {
       console.error('Onboarding navigation error:', error);
-      // Still navigate even if storage fails
       console.log('Error occurred, navigating anyway...');
       router.replace('/home');
     }
@@ -58,17 +53,17 @@ export default function OnboardingScreen() {
       {/* Features List */}
       <View style={styles.featuresContainer}>
         <FeatureItem
-          icon="✓"
+          icon={<Check size={24} color={Colors.primary} />}
           title="Verified Proof"
           desc="GPS-tagged, time-locked evidence"
         />
         <FeatureItem
-          icon="🔐"
+          icon={<Lock size={24} color={Colors.primary} />}
           title="Secure Hashing"
           desc="Cryptographic integrity verification"
         />
         <FeatureItem
-          icon={<FileJson size={24} color={Colors.textPrimary} />}
+          icon={<FileJson size={24} color={Colors.primary} />}
           title="Legal Export"
           desc="Court-admissible documentation"
         />
@@ -96,14 +91,10 @@ export default function OnboardingScreen() {
   );
 }
 
-function FeatureItem({ icon, title, desc }: { icon: string | React.ReactNode; title: string; desc: string }) {
+function FeatureItem({ icon, title, desc }: { icon: React.ReactNode; title: string; desc: string }) {
   return (
     <View style={styles.featureItem}>
-      {typeof icon === 'string' ? (
-        <Text style={styles.featureIcon}>{icon}</Text>
-      ) : (
-        <View style={{marginTop: 2}}>{icon}</View>
-      )}
+      <View style={styles.featureIconWrapper}>{icon}</View>
       <View style={styles.featureContent}>
         <Text style={styles.featureTitle}>{title}</Text>
         <Text style={styles.featureDesc}>{desc}</Text>
@@ -167,13 +158,12 @@ const styles = StyleSheet.create({
 
   featureItem: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
+    alignItems: 'center',
     gap: Spacing.md,
     paddingHorizontal: Spacing.md,
   },
 
-  featureIcon: {
-    fontSize: 24,
+  featureIconWrapper: {
     marginTop: 2,
   },
 

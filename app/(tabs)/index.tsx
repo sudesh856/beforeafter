@@ -1121,8 +1121,6 @@ export default function HomeScreen() {
       timeAnomalies: getDetectedAnomalies(),
     };
 
-
-
     const existing = await AsyncStorage.getItem('proofs');
     const proofs = existing ? JSON.parse(existing) : [];
 

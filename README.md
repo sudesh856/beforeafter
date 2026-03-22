@@ -205,6 +205,18 @@ GOOGLE_AI_API_KEY=your_google_ai_key_here
 **Note:** The AI narrative generation feature requires a valid Groq API key. Obtain your key from [https://groq.com](https://groq.com).
 
 
+## Configuration
+
+### Local Network Setup
+
+Update the API endpoint in [`app/config/api.ts`](./app/config/api.ts) with your machine's IP address:
+```ts
+const API_URL = 'http://[IP_ADDRESS]:PORT';
+```
+
+> **Note:** Use `ipconfig` (Windows) or `ifconfig` (Mac/Linux) to find your IP.
+
+
 ### UPDATE:
 Previously, the system stored only one public key per worker and overwrote it on reinstall or device change, meaning any proofs signed with an old key could no longer be verified once the key was updated, silently breaking long-term integrity. Now, the system adds immutable, key_id-based public-key versioning, where every device or reinstall creates a new key that is appended (not replaced), each proof records the exact key used to sign it, and verification fetches that specific key—while old proofs remain valid and simply show an informational “key rotated” flag if the signing key was later superseded. This matters because it restores cryptographic continuity: proofs become permanently verifiable evidence rather than state-dependent artifacts, enabling audits, disputes, and trust over time without changing any existing hashing, signing, or API behavior.
 
