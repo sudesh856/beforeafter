@@ -11,6 +11,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Clipboard from 'expo-clipboard';
 import * as Crypto from 'expo-crypto';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
+import { FileJson } from 'lucide-react-native';
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, Image, Platform, Pressable, SafeAreaView, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
@@ -325,7 +326,7 @@ export default function ProofDetail() {
     if (!isApiKeyConfigured()) {
       Alert.alert(
         'API Key Required',
-        'Please add your Google Gemini API key to /services/aiNarrationService.js to use this feature.\n\nGet a free key at: https://aistudio.google.com/app/apikey',
+        'Please configure your own AI API key to /services/aiNarrationService.js to use this feature.\n',
         [{ text: 'OK' }]
       );
       return;
@@ -512,6 +513,7 @@ export default function ProofDetail() {
             )}
             {verificationStatus === 'matched' && (
               <View style={[styles.statusContent, styles.successBg]}>
+                <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: '#22C55E', marginRight: 6 }} />
                 <Ionicons name="checkmark-circle" size={20} color="#10b981" />
                 <Text style={[styles.statusText, styles.successText]}>Hash verified — Data authentic</Text>
               </View>
@@ -863,7 +865,7 @@ export default function ProofDetail() {
                     style={styles.copyButton}
                     onPress={copyReportToClipboard}
                   >
-                    <Text style={styles.copyButtonText}>📋 Copy Report</Text>
+                    <View style={{ flexDirection: 'row', alignItems: 'center' }}><FileJson size={14} color="#3b82f6" /><Text style={styles.copyButtonText}> Copy Report</Text></View>
                   </TouchableOpacity>
 
                   <TouchableOpacity
@@ -893,7 +895,7 @@ export default function ProofDetail() {
               ]}
               onPress={handleDeleteProof}
             >
-              <Ionicons name="trash" size={20} color="#ffffff" />
+              <Ionicons name="trash" size={20} color="#EF4444" />
               <Text style={styles.deleteButtonText}>Delete Proof</Text>
             </Pressable>
           </View>
@@ -1361,19 +1363,21 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     paddingHorizontal: 16,
     borderRadius: 8,
-    backgroundColor: '#dc2626',
+    backgroundColor: 'transparent',
+    borderWidth: 1.5,
+    borderColor: '#EF4444',
     marginTop: 12,
   },
 
   deleteButtonPressed: {
     opacity: 0.8,
-    backgroundColor: '#b91c1c',
+    backgroundColor: '#fef2f2',
   },
 
   deleteButtonText: {
     fontSize: 14,
-    fontWeight: '600',
-    color: '#ffffff',
+    fontWeight: '400',
+    color: '#EF4444',
   },
 
   // Fingerprint Section Styles

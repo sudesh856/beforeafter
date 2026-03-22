@@ -1,5 +1,6 @@
 import { Colors } from '@/constants/uiTheme';
 import { Ionicons } from '@expo/vector-icons';
+import { Archive } from 'lucide-react-native';
 import { Tabs, useRouter, useSegments } from 'expo-router';
 import { useState } from 'react';
 import { TouchableOpacity } from 'react-native';
@@ -21,7 +22,7 @@ export default function TabLayout() {
   // FIX: Removed conditional display logic that was hiding tabs
   const getTabBarStyle = () => ({
     display: 'flex' as 'flex',
-    backgroundColor: Colors.surface,
+    backgroundColor: Colors.background,
     borderTopColor: Colors.border,
     borderTopWidth: 1,
     height: 65,
@@ -78,7 +79,7 @@ export default function TabLayout() {
           title: 'PROOFS',
           headerTitle: 'Proofs',
           tabBarIcon: ({ color, size }) => (
-            <Ionicons name="shield-checkmark" size={size} color={color} />
+            <Archive size={size} color={color} />
           ),
           tabBarStyle: getTabBarStyle(),
         }}

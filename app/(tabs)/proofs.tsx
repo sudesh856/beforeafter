@@ -365,16 +365,16 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     paddingHorizontal: 16,
     borderRadius: 8,
-    borderWidth: 2,
-    borderColor: '#fee2e2',
-    backgroundColor: '#fef2f2',
+    borderWidth: 1.5,
+    borderColor: '#EF4444',
+    backgroundColor: 'transparent',
     marginBottom: 16,
   },
 
   clearButtonText: {
     fontSize: 14,
-    fontWeight: '600',
-    color: '#dc2626',
+    fontWeight: '400',
+    color: '#EF4444',
   },
 
   exportSection: {

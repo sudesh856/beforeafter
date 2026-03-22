@@ -28,6 +28,7 @@ import * as FileSystem from 'expo-file-system/legacy';
 import * as Location from 'expo-location';
 import { useFocusEffect } from 'expo-router';
 import * as Sharing from 'expo-sharing';
+import { FileJson } from 'lucide-react-native';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
     ActivityIndicator,
@@ -194,14 +195,20 @@ export default function HomeScreen() {
     return R * c;
   };
 
-  // Hash an image file with GPS coordinates
-  const hashImage = async (uri: string, location: LocationData): Promise<string> => {
+  // Hash an image file by reading actual file bytes from disk
+  // BREAKING CHANGE: proofs generated before this fix used URI-based
+  // hashing and will not verify correctly with this version.
+  // Old proofs should be considered legacy and regenerated.
+  const hashImage = async (uri: string, _location: LocationData): Promise<string> => {
     try {
-      // Include GPS coordinates in the hash to prevent tampering
-      const hashInput = `${uri}${location.latitude}${location.longitude}${location.accuracy || ''}`;
+      // Read actual image file bytes from disk as base64
+      const base64 = await FileSystem.readAsStringAsync(uri, {
+        encoding: FileSystem.EncodingType.Base64,
+      });
+      // Hash the actual image content bytes
       const hash = await Crypto.digestStringAsync(
         Crypto.CryptoDigestAlgorithm.SHA256,
-        hashInput
+        base64
       );
       return hash;
     } catch (error) {
@@ -1820,9 +1827,11 @@ export default function HomeScreen() {
               <Text style={styles.timeWindowInfoText}>
                 Window: {selectedMinTimeMin}–{selectedMaxTimeMin} minutes
               </Text>
-              <Text style={styles.timeWindowWarning}>
-                ⚠️ These values cannot be changed once the session starts.
-              </Text>
+              <View style={styles.timeWindowWarningContainer}>
+                <Text style={styles.timeWindowWarning}>
+                  These values cannot be changed once the session starts.
+                </Text>
+              </View>
             </View>
 
             <TouchableOpacity
@@ -1990,17 +1999,22 @@ export default function HomeScreen() {
                       Elapsed: {(elapsedTimeMs / 1000).toFixed(1)}s
                     </Text>
                     {timeWindowStatus && (
-                      <Text style={[
-                        styles.timeWindowStatusBadge,
-                        timeWindowStatus === 'VALID' && styles.timeWindowStatusBadgeValid,
-                        timeWindowStatus === 'INVALID' && styles.timeWindowStatusBadgeInvalid,
-                        timeWindowStatus === 'EXPIRED' && styles.timeWindowStatusBadgeExpired,
-                      ]}>
-                        {timeWindowStatus === 'VALID' ? '✅ Ready to capture' :
-                          timeWindowStatus === 'EXPIRED' ? '❌ Expired' :
-                            '⏳ Not ready yet'}
-                      </Text>
+                      timeWindowStatus === 'VALID' ? (
+                        <View style={{flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-start', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8, backgroundColor: '#f0fdf4', marginTop: 4}}>
+                          <View style={{width: 8, height: 8, borderRadius: 4, backgroundColor: '#22C55E', marginRight: 6}} />
+                          <Text style={[styles.timeWindowStatusBadge, styles.timeWindowStatusBadgeValid]}>Ready to capture</Text>
+                        </View>
+                      ) : (
+                        <Text style={[
+                          styles.timeWindowStatusBadge,
+                          timeWindowStatus === 'INVALID' && styles.timeWindowStatusBadgeInvalid,
+                          timeWindowStatus === 'EXPIRED' && styles.timeWindowStatusBadgeExpired,
+                        ]}>
+                          {timeWindowStatus === 'EXPIRED' ? '❌ Expired' : '⏳ Not ready yet'}
+                        </Text>
+                      )
                     )}
+
                   </View>
                 </View>
               )}
@@ -2248,7 +2262,7 @@ export default function HomeScreen() {
                       }
                     }}
                   >
-                    <Text style={styles.copyButtonIcon}>📋</Text>
+                    <FileJson size={16} color="#4CAF50" />
                     <Text style={styles.copyButtonText}>Copy PIN</Text>
                   </TouchableOpacity>
 
@@ -2663,10 +2677,17 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginBottom: 4,
   },
+  timeWindowWarningContainer: {
+    borderLeftWidth: 3,
+    borderLeftColor: '#F59E0B',
+    backgroundColor: '#FFFBEB',
+    padding: 10,
+    borderRadius: 4,
+    marginTop: 4,
+  },
   timeWindowWarning: {
-    color: '#f97316',
+    color: '#92400E',
     fontSize: 12,
-    textAlign: 'center',
   },
 
   // Active Session

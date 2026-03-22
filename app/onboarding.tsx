@@ -1,6 +1,7 @@
 import { BorderRadius, Colors, Spacing, Typography } from '@/constants/uiTheme';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { router } from 'expo-router';
+import { FileJson } from 'lucide-react-native';
 import { useState } from 'react';
 import { ActivityIndicator, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
@@ -67,7 +68,7 @@ export default function OnboardingScreen() {
           desc="Cryptographic integrity verification"
         />
         <FeatureItem
-          icon="📋"
+          icon={<FileJson size={24} color={Colors.textPrimary} />}
           title="Legal Export"
           desc="Court-admissible documentation"
         />
@@ -95,10 +96,14 @@ export default function OnboardingScreen() {
   );
 }
 
-function FeatureItem({ icon, title, desc }: { icon: string; title: string; desc: string }) {
+function FeatureItem({ icon, title, desc }: { icon: string | React.ReactNode; title: string; desc: string }) {
   return (
     <View style={styles.featureItem}>
-      <Text style={styles.featureIcon}>{icon}</Text>
+      {typeof icon === 'string' ? (
+        <Text style={styles.featureIcon}>{icon}</Text>
+      ) : (
+        <View style={{marginTop: 2}}>{icon}</View>
+      )}
       <View style={styles.featureContent}>
         <Text style={styles.featureTitle}>{title}</Text>
         <Text style={styles.featureDesc}>{desc}</Text>

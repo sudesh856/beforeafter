@@ -34,6 +34,7 @@ export interface ProofObject {
     gps: {
       lat: number;
       lon: number;
+      accuracy?: number;
     };
   };
   after: {
@@ -42,6 +43,7 @@ export interface ProofObject {
     gps: {
       lat: number;
       lon: number;
+      accuracy?: number;
     };
   };
   // Optional fields needed for proofHash computation

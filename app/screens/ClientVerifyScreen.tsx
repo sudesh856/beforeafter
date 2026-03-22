@@ -8,6 +8,7 @@ import { fetchProofByPin } from '@/app/utils/proofUpload';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as Clipboard from 'expo-clipboard';
 import { useRouter } from 'expo-router';
+import { FileJson } from 'lucide-react-native';
 import React, { useEffect, useState } from 'react';
 import {
     ActivityIndicator,
@@ -279,7 +280,7 @@ export default function ClientVerifyScreen() {
         <ScrollView>
           {/* Verification banner */}
           <View style={styles.verificationBanner}>
-            <Text style={styles.verificationText}>✅ CRYPTOGRAPHICALLY VERIFIED</Text>
+            <Text style={styles.verificationText}>CRYPTOGRAPHICALLY VERIFIED</Text>
           </View>
 
           {/* Key Rotation Warning */}
@@ -421,7 +422,7 @@ export default function ClientVerifyScreen() {
               onPress={handlePastePin}
               disabled={state.loading || !!state.lockoutUntil}
             >
-              <Text style={styles.pasteButtonText}>📋 Paste</Text>
+              <View style={{flexDirection:'row', alignItems:'center'}}><FileJson size={14} color="#333" /><Text style={styles.pasteButtonText}> Paste</Text></View>
             </TouchableOpacity>
 
             {/* Scan QR Code Button */}
@@ -658,6 +659,7 @@ const styles = StyleSheet.create({
   verificationBanner: {
     backgroundColor: '#4CAF50',
     padding: 16,
+    paddingTop: 50,
     margin: 0,
     justifyContent: 'center',
     alignItems: 'center',

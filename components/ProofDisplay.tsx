@@ -11,6 +11,7 @@
  *   onEdit?: (proof: ProofObject) => void - Callback for edits (worker only)
  */
 
+import { Trash2 } from 'lucide-react-native';
 import PropTypes from 'prop-types';
 import React, { useEffect } from 'react';
 import {
@@ -234,7 +235,7 @@ export const ProofDisplay: React.FC<ProofDisplayProps> = ({
                     style={styles.deleteButton}
                     onPress={onDelete}
                   >
-                    <Text style={styles.deleteButtonText}>🗑️ Delete</Text>
+                    <View style={{flexDirection:'row', alignItems:'center', justifyContent:'center'}}><Trash2 size={14} color="#fff" /><Text style={styles.deleteButtonText}> Delete</Text></View>
                   </TouchableOpacity>
                 )}
               </View>

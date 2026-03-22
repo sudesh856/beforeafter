@@ -7,6 +7,7 @@ import { ProofRecord } from '@/lib/proof';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
+import { FileText, Link2, Scale, Upload } from 'lucide-react-native';
 import React, { useState } from 'react';
 import { Alert, Modal, Share, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
@@ -172,7 +173,7 @@ This evidence meets cryptographic standards for digital authentication.
 
   return (
     <View style={styles.container}>
-      <Text style={styles.sectionTitle}>📤 Platform Export</Text>
+      <View style={{flexDirection:'row', alignItems:'center'}}><Upload size={20} color="#1f2937" /><Text style={styles.sectionTitle}> Platform Export</Text></View>
       
       <TouchableOpacity style={styles.exportButton} onPress={exportJSON}>
         <Text style={styles.exportButtonText}>📊 Export JSON Report</Text>
@@ -180,25 +181,25 @@ This evidence meets cryptographic standards for digital authentication.
       </TouchableOpacity>
 
       <TouchableOpacity style={styles.exportButton} onPress={exportPDF}>
-        <Text style={styles.exportButtonText}>📄 Export PDF Report</Text>
+        <View style={{flexDirection:'row', alignItems:'center'}}><FileText size={16} color="white" /><Text style={styles.exportButtonText}> Export PDF Report</Text></View>
         <Text style={styles.exportSubtext}>For insurance, clients, documentation</Text>
       </TouchableOpacity>
 
       <TouchableOpacity style={styles.codeButton} onPress={shareVerificationCode}>
-        <Text style={styles.codeButtonText}>🔗 Share Verification Code</Text>
+        <View style={{flexDirection:'row', alignItems:'center'}}><Link2 size={16} color="white" /><Text style={styles.codeButtonText}> Share Verification Code</Text></View>
         <Text style={styles.exportSubtext}>Quick verification without full report</Text>
       </TouchableOpacity>
 
       {/* ▼▼▼ ADD LEGAL BUTTONS HERE ▼▼▼ */}
-    <Text style={styles.sectionTitle}>⚖️ Legal Evidence</Text>
+    <View style={{flexDirection:'row', alignItems:'center'}}><Scale size={20} color="#1f2937" /><Text style={styles.sectionTitle}> Legal Evidence</Text></View>
     
     <TouchableOpacity style={styles.legalButton} onPress={exportLegalJSON}>
-      <Text style={styles.legalButtonText}>⚖️ Legal JSON Evidence</Text>
+      <View style={{flexDirection:'row', alignItems:'center'}}><Scale size={16} color="white" /><Text style={styles.legalButtonText}> Legal JSON Evidence</Text></View>
       <Text style={styles.exportSubtext}>Court-admissible with affidavit</Text>
     </TouchableOpacity>
 
     <TouchableOpacity style={styles.legalButton} onPress={exportLegalPDF}>
-      <Text style={styles.legalButtonText}>⚖️ Legal PDF Evidence</Text>
+      <View style={{flexDirection:'row', alignItems:'center'}}><Scale size={16} color="white" /><Text style={styles.legalButtonText}> Legal PDF Evidence</Text></View>
       <Text style={styles.exportSubtext}>Human-readable for judges/lawyers</Text>
     </TouchableOpacity>
     {/* ▲▲▲ END LEGAL BUTTONS ▲▲▲ */}

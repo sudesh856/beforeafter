@@ -2,6 +2,7 @@
 // This wraps the existing capture logic with new premium styling
 
 import { BorderRadius, Colors, Spacing, Typography } from '@/constants/uiTheme';
+import { FileJson, Trash2 } from 'lucide-react-native';
 import { ActivityIndicator, SafeAreaView, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 
 interface CaptureScreenUIProps {
@@ -175,7 +176,7 @@ export function CaptureScreenUI({
         {/* Job Info Display */}
         {sessionMetadata?.jobId && !showMetadataForm && (
           <View style={styles.jobInfoCard}>
-            <Text style={styles.jobInfoText}>📋 {sessionMetadata.jobId}</Text>
+            <View style={{flexDirection:'row', alignItems:'center'}}><FileJson size={14} color={Colors.textPrimary} /><Text style={styles.jobInfoText}> {sessionMetadata.jobId}</Text></View>
             {sessionMetadata.clientName && (
               <Text style={styles.jobInfoText}>👤 {sessionMetadata.clientName}</Text>
             )}
@@ -242,7 +243,7 @@ export function CaptureScreenUI({
                 style={styles.dangerButton}
                 onPress={onCancelSession}
               >
-                <Text style={styles.dangerButtonText}>🗑️ Cancel Session</Text>
+                <View style={{flexDirection:'row', alignItems:'center'}}><Trash2 size={14} color={Colors.danger} /><Text style={styles.dangerButtonText}> Cancel Session</Text></View>
               </TouchableOpacity>
             </>
           )}

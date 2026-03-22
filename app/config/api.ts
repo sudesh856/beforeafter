@@ -1,7 +1,7 @@
 
 
 export const API_BASE_URL = __DEV__
-  ? 'http://192.168.1.89:8080'
+  ? 'http://192.168.1.66:8080'
   : 'https://your-production-url.com';
 
 export const API_ENDPOINTS = {
