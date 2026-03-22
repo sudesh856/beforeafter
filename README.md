@@ -208,6 +208,27 @@ GOOGLE_AI_API_KEY=your_google_ai_key_here
 ### UPDATE:
 Previously, the system stored only one public key per worker and overwrote it on reinstall or device change, meaning any proofs signed with an old key could no longer be verified once the key was updated, silently breaking long-term integrity. Now, the system adds immutable, key_id-based public-key versioning, where every device or reinstall creates a new key that is appended (not replaced), each proof records the exact key used to sign it, and verification fetches that specific key—while old proofs remain valid and simply show an informational “key rotated” flag if the signing key was later superseded. This matters because it restores cryptographic continuity: proofs become permanently verifiable evidence rather than state-dependent artifacts, enabling audits, disputes, and trust over time without changing any existing hashing, signing, or API behavior.
 
+
+```markdown
+## Image Hash Fix (March 2026)
+
+Previously, the `hashImage` function computed SHA-256 over the file 
+URI string concatenated with GPS coordinates — not the actual image 
+content. This meant two different photos at the same file path would 
+produce identical hashes, breaking the cryptographic binding between 
+the proof and the photo itself.
+
+As of this fix, the app reads actual image bytes from disk using 
+`expo-file-system` and hashes the base64 content via `expo-crypto`. 
+The proof now cryptographically commits to the image pixels, not 
+just the file path. Any modification to the photo after capture 
+will produce a different hash, invalidating the Ed25519 signature.
+
+**Note:** Proofs generated before this fix used URI-based hashing 
+and will not verify correctly with this version. Old proofs should 
+be considered legacy and regenerated.
+```
+
 ### Security Best Practices
 
 - Never commit API keys to version control
