@@ -2,9 +2,22 @@
 
 A mobile application that provides cryptographically verifiable, tamper-proof documentation of service work through before/after photo capture with Ed25519 digital signatures, external timestamp anchoring, and GPS verification.
 
+[View App Overview](https://knowtheapp.netlify.app)
+
 ## Overview
 
 This system enables workers to generate mathematically verifiable proof of completed work, and allows clients to independently verify that proof without trusting the application backend. The entire verification process is client-side, ensuring zero-trust security.
+
+
+This system eliminates these disputes through cryptographic proof that cannot be forged or tampered with.
+
+## Demo
+
+### Verified - Not Tampered
+[![Verified Demo](https://img.youtube.com/vi/uS1_eBp5i0M/0.jpg)](https://youtube.com/shorts/uS1_eBp5i0M)
+
+### Tampered Example
+[![Tampered Demo](https://img.youtube.com/vi/qs6qF8w9QUM/0.jpg)](https://youtube.com/shorts/qs6qF8w9QUM)
 
 ## Core Problem Solved
 
